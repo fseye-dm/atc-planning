@@ -318,11 +318,18 @@ textarea{resize:vertical;min-height:60px}
 
     <!-- BOUTON CONNEXION GOOGLE CLOUD -->
     <div id="google-signin-section" style="margin-bottom:14px;">
+      <!-- Indicateur de config Firebase -->
+      <div id="firebase-config-warning" style="display:none;padding:8px 12px;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;font-size:11px;color:#92400e;margin-bottom:10px;text-align:center;font-weight:600;">
+        ⚠️ Firebase non configuré — le bouton Google ne fonctionnera pas.<br>
+        <span style="font-weight:400;">Remplacez FIREBASE_CONFIG dans index.html et re-publiez sur GitHub.</span>
+      </div>
       <button id="btn-google" onclick="_fbSignIn()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px;padding:11px 18px;background:#fff;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;color:#1e293b;transition:all .2s;box-shadow:0 2px 8px rgba(0,0,0,.08);" onmouseover="this.style.borderColor='#1D4ED8'" onmouseout="this.style.borderColor='#e2e8f0'">
         <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
         Se connecter avec Google
       </button>
       <div id="google-user-info" style="display:none;margin-top:8px;padding:8px 12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;font-size:12px;color:#166534;text-align:center;"></div>
+      <!-- Message d'état Firebase (diagnostic) -->
+      <div id="google-status-bar" style="display:none;margin-top:6px;padding:7px 12px;border-radius:7px;font-size:11px;text-align:center;font-weight:600;"></div>
       <div style="display:flex;align-items:center;gap:8px;margin:12px 0 8px;">
         <div style="flex:1;height:1px;background:#e2e8f0;"></div>
         <span style="font-size:10px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.5px;">ou connexion locale</span>
@@ -730,7 +737,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v10.6';
+var APP_VERSION = 'v10.6.1';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -740,19 +747,19 @@ var APP_NAME    = 'DM-PLANNING';
 // Collez ici votre bloc firebaseConfig copié depuis la console Firebase
 // (console.firebase.google.com → Paramètres projet → Vos applications)
 var FIREBASE_CONFIG = {
-  apiKey:            "VOTRE_API_KEY_ICI",
-  authDomain:        "VOTRE_PROJECT.firebaseapp.com",
-  databaseURL:       "https://VOTRE_PROJECT-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId:         "VOTRE_PROJECT",
-  storageBucket:     "VOTRE_PROJECT.appspot.com",
-  messagingSenderId: "VOTRE_SENDER_ID",
-  appId:             "VOTRE_APP_ID"
+  apiKey:            "AIzaSyCiu_elg6Nait_2AMNFj_U3qCw8A6AtaxU",
+  authDomain:        "dm-planning-soseter.firebaseapp.com",
+  databaseURL:       "https://dm-planning-soseter-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "dm-planning-soseter",
+  storageBucket:     "dm-planning-soseter.firebasestorage.app",
+  messagingSenderId: "1076715112896",
+  appId:             "1:1076715112896:web:fe7c74575c6e31a83ce025"
 };
 
 // Emails autorisés → profil automatique
 var FIREBASE_AUTH_EMAILS = {
   "f.seye2018@gmail.com":       "dm",    // Directeur Matériel
-  "souleye.cisse@soseter.com":  "chef"   // Chef d'Atelier
+  "souleyecisse017@gmail.com":  "chef"   // Chef d'Atelier
 };
 
 // Instances Firebase (initialisées par _fbInit)
@@ -1502,6 +1509,15 @@ function _fbInit() {
   // Vérifier que la config est remplie
   if (!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey === 'VOTRE_API_KEY_ICI') {
     console.warn('DM-PLANNING: Firebase non configuré. Fonctionnement en mode local uniquement.');
+    // Afficher l'avertissement sur l'écran de login
+    var w = document.getElementById('firebase-config-warning');
+    if (w) w.style.display = 'block';
+    var btn = document.getElementById('btn-google');
+    if (btn) {
+      btn.style.opacity = '0.45';
+      btn.style.cursor = 'not-allowed';
+      btn.title = 'Firebase non configuré — remplacez FIREBASE_CONFIG dans le code';
+    }
     return;
   }
   try {
@@ -1509,6 +1525,31 @@ function _fbInit() {
     _fbAuth = firebase.auth();
     _fbDB   = firebase.database();
     _fbReady = true;
+
+    // Traiter le retour de redirection Google (après signInWithRedirect)
+    _fbAuth.getRedirectResult().then(function(result) {
+      if (result && result.user) {
+        // Connexion réussie via redirect — onAuthStateChanged va se déclencher
+        console.log('Firebase redirect result: signed in as', result.user.email);
+      }
+    }).catch(function(err) {
+      if (err.code === 'auth/unauthorized-domain') {
+        // Domaine non autorisé dans Firebase — afficher instruction
+        var info = document.getElementById('google-user-info');
+        if (info) {
+          info.style.display = 'block';
+          info.style.background = '#fef2f2';
+          info.style.border = '1px solid #fca5a5';
+          info.style.color = '#991b1b';
+          info.innerHTML = '⛔ Domaine non autorisé dans Firebase.<br>' +
+            'Allez sur console.firebase.google.com → Authentication → Settings → Domaines autorisés → Ajouter : <strong>' + location.hostname + '</strong>';
+        }
+        console.error('Firebase: unauthorized domain', location.hostname, '— add it in Firebase Auth settings');
+      } else if (err.code && err.code !== 'auth/no-auth-event') {
+        console.error('Firebase redirect result error:', err.code, err.message);
+      }
+    });
+
     // Observer d'état d'authentification
     _fbAuth.onAuthStateChanged(function(user) {
       if (user) {
@@ -1519,19 +1560,62 @@ function _fbInit() {
     });
   } catch(e) {
     console.error('Firebase init error:', e);
+    var info = document.getElementById('google-user-info');
+    if (info) {
+      info.style.display = 'block';
+      info.style.background = '#fef2f2';
+      info.style.border = '1px solid #fca5a5';
+      info.style.color = '#991b1b';
+      info.textContent = '❌ Erreur initialisation Firebase : ' + e.message;
+    }
   }
 }
 
-// Connexion Google
+// Connexion Google — utilise signInWithRedirect (fiable sur GitHub Pages)
 function _fbSignIn() {
   if (!_fbReady) { _fbInit(); }
-  if (!_fbReady) { toast('⚠ Firebase non configuré. Vérifiez FIREBASE_CONFIG dans le code.'); return; }
+  if (!_fbReady) {
+    // Firebase non configuré : afficher message explicite
+    var btn = document.getElementById('btn-google');
+    if (btn) {
+      btn.style.borderColor = '#ef4444';
+      btn.style.background = '#fef2f2';
+    }
+    var info = document.getElementById('google-user-info');
+    if (info) {
+      info.style.display = 'block';
+      info.style.background = '#fef2f2';
+      info.style.border = '1px solid #fca5a5';
+      info.style.color = '#991b1b';
+      info.textContent = '⚠ Firebase non configuré — remplacez FIREBASE_CONFIG dans le code puis re-publiez sur GitHub.';
+    }
+    return;
+  }
+
+  // Afficher feedback "Redirection en cours..."
+  var btn = document.getElementById('btn-google');
+  if (btn) {
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.innerHTML = btn.innerHTML.replace('Se connecter avec Google', '⏳ Redirection Google...');
+  }
+
   var provider = new firebase.auth.GoogleAuthProvider();
   provider.addScope('email');
-  _fbAuth.signInWithPopup(provider).catch(function(err) {
-    if (err.code !== 'auth/popup-closed-by-user') {
-      toast('❌ Connexion Google échouée : ' + err.message);
+  provider.setCustomParameters({ prompt: 'select_account' });
+
+  // Redirect (pas popup) — fonctionne sur tous les navigateurs et GitHub Pages
+  _fbAuth.signInWithRedirect(provider).catch(function(err) {
+    console.error('Firebase redirect error:', err);
+    var info = document.getElementById('google-user-info');
+    if (info) {
+      info.style.display = 'block';
+      info.style.background = '#fef2f2';
+      info.style.border = '1px solid #fca5a5';
+      info.style.color = '#991b1b';
+      info.textContent = '❌ Erreur : ' + (err.message || err.code);
     }
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
   });
 }
 
@@ -1548,24 +1632,38 @@ function _fbSignOut() {
 function _fbOnSignedIn(user) {
   var email = user.email || '';
   var role  = FIREBASE_AUTH_EMAILS[email];
+  var btn   = document.getElementById('btn-google');
+  if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+
   // Vérifier que l'email est autorisé
   if (!role) {
-    toast('⛔ Accès refusé : ' + email + ' n\'est pas autorisé dans cette application.');
+    var infoX = document.getElementById('google-user-info');
+    if (infoX) {
+      infoX.style.display = 'block';
+      infoX.style.background = '#fef2f2';
+      infoX.style.border = '1px solid #fca5a5';
+      infoX.style.color = '#991b1b';
+      infoX.textContent = '\u26d4 Acc\u00e8s refus\u00e9 : ' + email + ' n\'est pas autoris\u00e9.';
+    }
     _fbAuth.signOut();
     return;
   }
-  // Afficher l'info utilisateur
+
+  // Afficher l'info utilisateur (style succès)
   var info = document.getElementById('google-user-info');
   if (info) {
     info.style.display = 'block';
-    info.innerHTML = '✅ Connecté : <strong>' + (user.displayName || email) + '</strong>' +
-      '<br><span style="font-size:10px;opacity:.7;">Profil : ' + (role === 'dm' ? '👔 Directeur Matériel' : '🔧 Chef d\'Atelier') + '</span>';
+    info.style.background = '#f0fdf4';
+    info.style.border = '1px solid #86efac';
+    info.style.color = '#166534';
+    info.innerHTML = '\u2705 Connect\u00e9 : <strong>' + (user.displayName || email) + '</strong>' +
+      '&nbsp;&nbsp;<span style="font-size:10px;opacity:.8;">' + (role === 'dm' ? '\ud83d\udc54 Dir. Mat\u00e9riel' : '\ud83d\udd27 Chef d\'Atelier') + '</span>';
   }
   // Pré-sélectionner le profil correspondant à l'email
   selRole(role);
   // Démarrer la synchronisation Firebase
   _fbStartSync(role);
-  toast('☁ Connecté : ' + (user.displayName || email));
+  toast('\u2601 Connect\u00e9 : ' + (user.displayName || email));
 }
 
 // Callback : utilisateur déconnecté
