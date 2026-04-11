@@ -303,10 +303,14 @@ textarea{resize:vertical;min-height:60px}
 #topbar .week-info{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:var(--b6);background:var(--b1);border:1px solid #bfdbfe;padding:4px 11px;border-radius:16px;white-space:nowrap}
 
 </style>
-<!-- Firebase SDK (Cloud Sync) -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<!-- Firebase SDK (Cloud Sync) — double CDN pour fiabilité Edge/Chrome -->
+<!-- CDN primaire : unpkg (npm mirror, moins filtré par Tracking Prevention) -->
+<script src="https://unpkg.com/firebase@10.8.0/firebase-app-compat.js" 
+  onerror="this.onerror=null;this.src='https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js'"></script>
+<script src="https://unpkg.com/firebase@10.8.0/firebase-auth-compat.js"
+  onerror="this.onerror=null;this.src='https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js'"></script>
+<script src="https://unpkg.com/firebase@10.8.0/firebase-database-compat.js"
+  onerror="this.onerror=null;this.src='https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js'"></script>
 </head>
 
 <!-- LOGIN -->
@@ -323,9 +327,9 @@ textarea{resize:vertical;min-height:60px}
         ⚠️ Firebase non configuré — le bouton Google ne fonctionnera pas.<br>
         <span style="font-weight:400;">Remplacez FIREBASE_CONFIG dans index.html et re-publiez sur GitHub.</span>
       </div>
-      <button id="btn-google" onclick="_fbSignIn()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px;padding:11px 18px;background:#fff;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;color:#1e293b;transition:all .2s;box-shadow:0 2px 8px rgba(0,0,0,.08);" onmouseover="this.style.borderColor='#1D4ED8'" onmouseout="this.style.borderColor='#e2e8f0'">
-        <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-        Se connecter avec Google
+      <button id="btn-google" onclick="_fbSignIn()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px;padding:11px 18px;background:#fff;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;color:#1e293b;transition:all .2s;box-shadow:0 2px 8px rgba(0,0,0,.08);" onmouseover="if(!this.disabled)this.style.borderColor='#1D4ED8'" onmouseout="this.style.borderColor='#e2e8f0'">
+        <svg id="btn-google-icon" width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        <span id="btn-google-label">Se connecter avec Google</span>
       </button>
       <div id="google-user-info" style="display:none;margin-top:8px;padding:8px 12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;font-size:12px;color:#166534;text-align:center;"></div>
       <!-- Message d'état Firebase (diagnostic) -->
@@ -737,7 +741,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v10.6.1';
+var APP_VERSION = 'v10.7';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -745,7 +749,7 @@ var APP_NAME    = 'DM-PLANNING';
 // FIREBASE CLOUD SYNC — Configuration
 // ============================================================
 // Collez ici votre bloc firebaseConfig copié depuis la console Firebase
-// (console.firebase.google.com → Paramètres projet → Vos applications)
+// (console.firebase.google.com - Parametres projet - Vos applications)
 var FIREBASE_CONFIG = {
   apiKey:            "AIzaSyCiu_elg6Nait_2AMNFj_U3qCw8A6AtaxU",
   authDomain:        "dm-planning-soseter.firebaseapp.com",
@@ -753,7 +757,7 @@ var FIREBASE_CONFIG = {
   projectId:         "dm-planning-soseter",
   storageBucket:     "dm-planning-soseter.firebasestorage.app",
   messagingSenderId: "1076715112896",
-  appId:             "1:1076715112896:web:fe7c74575c6e31a83ce025",
+  appId:             "1:1076715112896:web:fe7c74575c6e31a83ce025"
   clientId: "1076715112896-daf9o5p25d0jjijk1rjfnkt4jg6jqmu1.apps.googleusercontent.com"
 };
 
@@ -762,49 +766,7 @@ var FIREBASE_AUTH_EMAILS = {
   "f.seye2018@gmail.com":       "dm",    // Directeur Matériel
   "souleyecisse017@gmail.com":  "chef"   // Chef d'Atelier
 };
-// --- DEBUT DU CORRECTIF DE REDIRECTION ---
-firebase.initializeApp(FIREBASE_CONFIG);
-const auth = firebase.auth();
-const db = firebase.database();
 
-// Force la mémorisation de la session sur l'appareil
-auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-
-// Nouvelle fonction de login (écrase l'ancienne si elle existe)
-function loginWithGoogle() {
-    console.log("Tentative de connexion par redirection...");
-    const provider = new firebase.auth.GoogleAuthProvider();
-    auth.signInWithRedirect(provider);
-}
-
-// Surveillance de l'état (affiche le dashboard si connecté)
-auth.onAuthStateChanged((user) => {
-    if (user) {
-        const emailLower = user.email.toLowerCase();
-        if (FIREBASE_AUTH_EMAILS[emailLower]) {
-            console.log("Connecté en tant que :", emailLower);
-            document.getElementById('login-screen').style.display = 'none';
-            document.getElementById('sidebar').style.display = 'flex';
-            document.getElementById('main').style.display = 'flex';
-            
-            // Si vous avez une fonction qui lance l'app, elle s'appelle ici
-            if (typeof initApp === "function") initApp(); 
-        } else {
-            alert("Email non autorisé.");
-            auth.signOut();
-        }
-    }
-});
-
-// Capture le résultat au retour de Google
-auth.getRedirectResult().catch(err => console.error("Erreur Auth:", err.message));
-
-// Liaison au bouton au chargement
-document.addEventListener('DOMContentLoaded', () => {
-    const btn = document.querySelector('.lbtn');
-    if (btn) btn.onclick = loginWithGoogle;
-});
-// --- FIN DU CORRECTIF ---
 // Instances Firebase (initialisées par _fbInit)
 var _fbApp = null, _fbAuth = null, _fbDB = null, _fbListener = null;
 var _fbReady = false;  // true après initApp + auth
@@ -1546,119 +1508,214 @@ function _showMergeNotif(by, log) {
 // FIREBASE CLOUD ENGINE — Authentification + Sync temps réel
 // ============================================================
 
+// ── Clé localStorage pour signaler un redirect en cours
+var _FB_REDIRECT_KEY = 'dm_fb_redirect_pending';
+
+function _fbShowInfo(msg, type) {
+  // type: 'ok' | 'warn' | 'err' | 'info'
+  var info = document.getElementById('google-user-info');
+  if (!info) return;
+  var styles = {
+    ok:   { bg:'#f0fdf4', border:'#86efac', color:'#166534' },
+    warn: { bg:'#fef3c7', border:'#f59e0b', color:'#92400e' },
+    err:  { bg:'#fef2f2', border:'#fca5a5', color:'#991b1b' },
+    info: { bg:'#eff6ff', border:'#93c5fd', color:'#1e40af' }
+  };
+  var s = styles[type] || styles.info;
+  info.style.display = 'block';
+  info.style.background = s.bg;
+  info.style.border = '1px solid ' + s.border;
+  info.style.color = s.color;
+  info.innerHTML = msg;
+}
+
 function _fbInit() {
-  // Ne pas ré-initialiser si déjà fait
   if (_fbApp) return;
-  // Vérifier que la config est remplie
+
+  // ── Vérifier que la config est remplie
   if (!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey === 'VOTRE_API_KEY_ICI') {
-    console.warn('DM-PLANNING: Firebase non configuré. Fonctionnement en mode local uniquement.');
-    // Afficher l'avertissement sur l'écran de login
+    console.warn('DM-PLANNING: Firebase non configuré. Mode local uniquement.');
     var w = document.getElementById('firebase-config-warning');
     if (w) w.style.display = 'block';
     var btn = document.getElementById('btn-google');
-    if (btn) {
-      btn.style.opacity = '0.45';
-      btn.style.cursor = 'not-allowed';
-      btn.title = 'Firebase non configuré — remplacez FIREBASE_CONFIG dans le code';
-    }
+    if (btn) { btn.style.opacity = '0.45'; btn.style.cursor = 'not-allowed'; btn.title = 'Firebase non configuré'; }
     return;
   }
+
+  // ── Afficher indicateur "Chargement..." si retour de redirect
+  var redirectPending = (localStorage.getItem(_FB_REDIRECT_KEY) === '1');
+  if (redirectPending) {
+    _fbShowInfo('⏳ Connexion Google en cours... veuillez patienter.', 'info');
+    var btn = document.getElementById('btn-google');
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+  }
+
   try {
+    // ── Vérifier que la lib Firebase est chargée
+    if (typeof firebase === 'undefined' || !firebase.initializeApp) {
+      throw new Error('La biblioth\u00e8que Firebase ne s\'est pas charg\u00e9e. V\u00e9rifiez votre connexion internet.');
+    }
+
     _fbApp  = firebase.initializeApp(FIREBASE_CONFIG);
     _fbAuth = firebase.auth();
     _fbDB   = firebase.database();
-    _fbReady = true;
 
-    // Traiter le retour de redirection Google (après signInWithRedirect)
-    _fbAuth.getRedirectResult().then(function(result) {
+    // ── PERSISTANCE LOCAL : évite la perte de session lors du redirect
+    // Utilise localStorage (pas IndexedDB) — non bloqué par Edge Tracking Prevention
+    _fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).then(function() {
+      _fbReady = true;
+
+      // ── Récupérer le résultat du redirect Google
+      return _fbAuth.getRedirectResult();
+
+    }).then(function(result) {
+      // Nettoyer le flag redirect dans tous les cas
+      localStorage.removeItem(_FB_REDIRECT_KEY);
+
+      var btn = document.getElementById('btn-google');
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+
       if (result && result.user) {
-        // Connexion réussie via redirect — onAuthStateChanged va se déclencher
-        console.log('Firebase redirect result: signed in as', result.user.email);
+        // Connexion redirect réussie
+        console.log('Firebase: redirect auth OK ->', result.user.email);
+        // onAuthStateChanged va se déclencher juste après
+      } else if (redirectPending) {
+        // On était censé avoir un résultat mais il est null
+        // Cela arrive quand Edge bloque le cookie de redirection
+        _fbShowInfo(
+          '\u26a0\ufe0f La redirection Google n\'a pas abouti (protection Edge).<br>' +
+          'Essayez : <strong>1)</strong> Ouvrir Edge → ··· → Paramètres → Confidentialité → Protection du suivi → Mettre sur "De base" temporairement<br>' +
+          'Ou : <strong>2)</strong> Cliquez à nouveau sur "Se connecter avec Google" dans ce navigateur.',
+          'warn'
+        );
       }
+
     }).catch(function(err) {
+      localStorage.removeItem(_FB_REDIRECT_KEY);
+      var btn = document.getElementById('btn-google');
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+
+      console.error('Firebase auth error:', err.code, err.message);
+
       if (err.code === 'auth/unauthorized-domain') {
-        // Domaine non autorisé dans Firebase — afficher instruction
-        var info = document.getElementById('google-user-info');
-        if (info) {
-          info.style.display = 'block';
-          info.style.background = '#fef2f2';
-          info.style.border = '1px solid #fca5a5';
-          info.style.color = '#991b1b';
-          info.innerHTML = '⛔ Domaine non autorisé dans Firebase.<br>' +
-            'Allez sur console.firebase.google.com → Authentication → Settings → Domaines autorisés → Ajouter : <strong>' + location.hostname + '</strong>';
-        }
-        console.error('Firebase: unauthorized domain', location.hostname, '— add it in Firebase Auth settings');
+        _fbShowInfo(
+          '⛔ Domaine non autorisé : <strong>' + location.hostname + '</strong><br>' +
+          'Allez sur console.firebase.google.com → Authentication → Settings → Domaines autorisés → Ajouter : <strong>' + location.hostname + '</strong>',
+          'err'
+        );
+      } else if (err.code === 'auth/network-request-failed') {
+        _fbShowInfo('❌ Erreur réseau — vérifiez votre connexion internet.', 'err');
+      } else if (err.code === 'auth/web-storage-unsupported' || err.code === 'auth/operation-not-supported-in-this-environment') {
+        _fbShowInfo(
+          '⛔ Stockage web bloqué par Edge.<br>' +
+          'Allez dans Paramètres Edge → Confidentialité → Protection du suivi → mettre sur "De base".',
+          'err'
+        );
       } else if (err.code && err.code !== 'auth/no-auth-event') {
-        console.error('Firebase redirect result error:', err.code, err.message);
+        _fbShowInfo('❌ Erreur Firebase (' + err.code + ') : ' + err.message, 'err');
       }
     });
 
-    // Observer d'état d'authentification
+    // ── Écouter les changements d'état d'authentification
     _fbAuth.onAuthStateChanged(function(user) {
       if (user) {
         _fbOnSignedIn(user);
       } else {
-        _fbOnSignedOut();
+        // Ne signaler "déconnecté" que si on ne venait pas d'un redirect en cours
+        if (!redirectPending || localStorage.getItem(_FB_REDIRECT_KEY) === null) {
+          _fbOnSignedOut();
+        }
       }
     });
+
   } catch(e) {
+    localStorage.removeItem(_FB_REDIRECT_KEY);
     console.error('Firebase init error:', e);
-    var info = document.getElementById('google-user-info');
-    if (info) {
-      info.style.display = 'block';
-      info.style.background = '#fef2f2';
-      info.style.border = '1px solid #fca5a5';
-      info.style.color = '#991b1b';
-      info.textContent = '❌ Erreur initialisation Firebase : ' + e.message;
-    }
+    _fbShowInfo('❌ Erreur initialisation Firebase : ' + e.message, 'err');
   }
 }
 
-// Connexion Google — utilise signInWithRedirect (fiable sur GitHub Pages)
+// Connexion Google — Popup (Chrome) avec fallback Redirect (Edge)
 function _fbSignIn() {
   if (!_fbReady) { _fbInit(); }
   if (!_fbReady) {
-    // Firebase non configuré : afficher message explicite
-    var btn = document.getElementById('btn-google');
-    if (btn) {
-      btn.style.borderColor = '#ef4444';
-      btn.style.background = '#fef2f2';
-    }
-    var info = document.getElementById('google-user-info');
-    if (info) {
-      info.style.display = 'block';
-      info.style.background = '#fef2f2';
-      info.style.border = '1px solid #fca5a5';
-      info.style.color = '#991b1b';
-      info.textContent = '⚠ Firebase non configuré — remplacez FIREBASE_CONFIG dans le code puis re-publiez sur GitHub.';
-    }
+    _fbShowInfo('⚠ Firebase non configuré — remplacez FIREBASE_CONFIG dans index.html et re-publiez.', 'warn');
+    var btn2 = document.getElementById('btn-google');
+    if (btn2) { btn2.style.borderColor = '#ef4444'; btn2.style.background = '#fef2f2'; }
     return;
   }
 
-  // Afficher feedback "Redirection en cours..."
   var btn = document.getElementById('btn-google');
-  if (btn) {
-    btn.disabled = true;
-    btn.style.opacity = '0.7';
-    btn.innerHTML = btn.innerHTML.replace('Se connecter avec Google', '⏳ Redirection Google...');
-  }
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.7'; }
 
   var provider = new firebase.auth.GoogleAuthProvider();
   provider.addScope('email');
   provider.setCustomParameters({ prompt: 'select_account' });
 
-  // Redirect (pas popup) — fonctionne sur tous les navigateurs et GitHub Pages
-  _fbAuth.signInWithRedirect(provider).catch(function(err) {
-    console.error('Firebase redirect error:', err);
-    var info = document.getElementById('google-user-info');
-    if (info) {
-      info.style.display = 'block';
-      info.style.background = '#fef2f2';
-      info.style.border = '1px solid #fca5a5';
-      info.style.color = '#991b1b';
-      info.textContent = '❌ Erreur : ' + (err.message || err.code);
-    }
+  // ── Stratégie : Popup d'abord (instantané) → fallback Redirect si bloqué
+  _fbAuth.signInWithPopup(provider).then(function(result) {
+    // Popup réussie (Chrome, Firefox, Edge sans protection stricte)
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+    console.log('Firebase: popup auth OK');
+    // onAuthStateChanged se déclenche automatiquement
+
+  }).catch(function(popupErr) {
+    console.warn('Firebase popup bloqué (' + popupErr.code + ') → bascule sur redirect');
+
+    // Codes qui indiquent que le popup a été bloqué (pas une erreur utilisateur)
+    var popupBlocked = [
+      'auth/popup-blocked',
+      'auth/popup-closed-by-user',
+      'auth/cancelled-popup-request',
+      'auth/internal-error'
+    ];
+
+    if (popupBlocked.indexOf(popupErr.code) !== -1 || popupErr.code === undefined) {
+      // Basculer vers signInWithRedirect
+      if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.7';
+        var lbl=document.getElementById('btn-google-label'); if(lbl) lbl.textContent='⏳ Redirection Google...';
+      }
+      _fbShowInfo('⏳ Redirection vers Google... la page va se recharger.', 'info');
+
+      // Poser le flag avant la redirection (localStorage survit au rechargement)
+      try { localStorage.setItem(_FB_REDIRECT_KEY, '1'); } catch(e) {}
+
+      _fbAuth.signInWithRedirect(provider).catch(function(redirErr) {
+        try { localStorage.removeItem(_FB_REDIRECT_KEY); } catch(e) {}
+        if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+
+        if (redirErr.code === 'auth/web-storage-unsupported') {
+          _fbShowInfo(
+            '⛔ Stockage bloqué par Edge.<br>' +
+            '<strong>Solution :</strong> Edge → Paramètres → Confidentialité → Protection du suivi → choisir "De base".<br>' +
+            'Puis revenez sur l\'application.',
+            'err'
+          );
+        } else {
+          _fbShowInfo('❌ Erreur redirection (' + redirErr.code + ') : ' + redirErr.message, 'err');
+        }
+      });
+
+    } else if (popupErr.code === 'auth/unauthorized-domain') {
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+      _fbShowInfo(
+        '⛔ Domaine non autorisé : <strong>' + location.hostname + '</strong><br>' +
+        'console.firebase.google.com → Authentication → Settings → Domaines autorisés → Ajouter : <strong>' + location.hostname + '</strong>',
+        'err'
+      );
+    } else if (popupErr.code === 'auth/operation-not-allowed') {
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+      _fbShowInfo(
+        '⛔ Connexion Google non activée dans Firebase.<br>' +
+        'console.firebase.google.com → Authentication → Sign-in method → Google → Activer.',
+        'err'
+      );
+    } else {
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+      _fbShowInfo('❌ Erreur connexion (' + popupErr.code + ') : ' + popupErr.message, 'err');
+    }
   });
 }
 
