@@ -762,7 +762,49 @@ var FIREBASE_AUTH_EMAILS = {
   "f.seye2018@gmail.com":       "dm",    // Directeur Matériel
   "souleyecisse017@gmail.com":  "chef"   // Chef d'Atelier
 };
+// --- DEBUT DU CORRECTIF DE REDIRECTION ---
+firebase.initializeApp(FIREBASE_CONFIG);
+const auth = firebase.auth();
+const db = firebase.database();
 
+// Force la mémorisation de la session sur l'appareil
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+// Nouvelle fonction de login (écrase l'ancienne si elle existe)
+function loginWithGoogle() {
+    console.log("Tentative de connexion par redirection...");
+    const provider = new firebase.auth.GoogleAuthProvider();
+    auth.signInWithRedirect(provider);
+}
+
+// Surveillance de l'état (affiche le dashboard si connecté)
+auth.onAuthStateChanged((user) => {
+    if (user) {
+        const emailLower = user.email.toLowerCase();
+        if (FIREBASE_AUTH_EMAILS[emailLower]) {
+            console.log("Connecté en tant que :", emailLower);
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('sidebar').style.display = 'flex';
+            document.getElementById('main').style.display = 'flex';
+            
+            // Si vous avez une fonction qui lance l'app, elle s'appelle ici
+            if (typeof initApp === "function") initApp(); 
+        } else {
+            alert("Email non autorisé.");
+            auth.signOut();
+        }
+    }
+});
+
+// Capture le résultat au retour de Google
+auth.getRedirectResult().catch(err => console.error("Erreur Auth:", err.message));
+
+// Liaison au bouton au chargement
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.querySelector('.lbtn');
+    if (btn) btn.onclick = loginWithGoogle;
+});
+// --- FIN DU CORRECTIF ---
 // Instances Firebase (initialisées par _fbInit)
 var _fbApp = null, _fbAuth = null, _fbDB = null, _fbListener = null;
 var _fbReady = false;  // true après initApp + auth
