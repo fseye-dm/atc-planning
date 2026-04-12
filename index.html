@@ -6415,17 +6415,31 @@ updateWeekBadge();
 document.getElementById('lpw').addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
 document.getElementById('dmauthpw').addEventListener('keydown', function(e) { if (e.key === 'Enter') confirmDMAuth(); });
 document.getElementById('cl-input').addEventListener('keydown', function(e) { if (e.key === 'Enter') addCL(); });
+
 var rptComment = document.getElementById('rpt-comment');
-if (rptComment) rptComment.addEventListener('input', function() {
-  clearTimeout(window._rptT);
-  window._rptT = setTimeout(function() {
-    // Persister le commentaire Chef dans APP
-    APP.planning.rptComment = rptComment.value;
-    _stampField('planning.rptComment');
-    saveApp();
-    renderReport();
-  }, 500);
-});
+if (rptComment) {
+  rptComment.addEventListener('input', function() {
+    clearTimeout(window._rptT);
+    window._rptT = setTimeout(function() {
+      // Persister le commentaire Chef dans APP
+      if(window.APP && APP.planning) {
+        APP.planning.rptComment = rptComment.value;
+        _stampField('planning.rptComment');
+        saveApp();
+        renderReport();
+      }
+    }, 500);
+  });
+}
+
+// --- INITIALISATION FINALE ---
+window.onload = function() {
+  // On tente d'initialiser Firebase au chargement
+  if (typeof _fbInit === 'function') {
+    _fbInit();
+  }
+};
+
 </script>
 </body>
 </html>
