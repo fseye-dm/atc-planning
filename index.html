@@ -303,14 +303,10 @@ textarea{resize:vertical;min-height:60px}
 #topbar .week-info{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:var(--b6);background:var(--b1);border:1px solid #bfdbfe;padding:4px 11px;border-radius:16px;white-space:nowrap}
 
 </style>
-<!-- Firebase SDK (Cloud Sync) — double CDN pour fiabilité Edge/Chrome -->
-<!-- CDN primaire : unpkg (npm mirror, moins filtré par Tracking Prevention) -->
-<script src="https://unpkg.com/firebase@10.14.1/firebase-app-compat.js" 
-  onerror="this.onerror=null;this.src='https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js'"></script>
-<script src="https://unpkg.com/firebase@10.14.1/firebase-auth-compat.js"
-  onerror="this.onerror=null;this.src='https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js'"></script>
-<script src="https://unpkg.com/firebase@10.14.1/firebase-database-compat.js"
-  onerror="this.onerror=null;this.src='https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js'"></script>
+<!-- Firebase SDK v10.x — CDN officiel Google (stable, certifié, non filtré) -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
 </head>
 
 <!-- LOGIN -->
@@ -781,6 +777,7 @@ var APP_CONFIG = {
 // Instances Firebase (initialisées par _fbInit)
 var _fbApp = null, _fbAuth = null, _fbDB = null, _fbListener = null;
 var _fbReady = false;  // true après initApp + auth
+var _fbInitRetries = 0; // compteur de tentatives de chargement Firebase
 
 function _injectSignatures() {
   var sig = APP_NAME + ' ' + APP_VERSION;
@@ -1574,12 +1571,26 @@ function _fbInit() {
     if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
   }
 
-  try {
-    // ── Vérifier que la lib Firebase est chargée
-    if (typeof firebase === 'undefined' || !firebase.initializeApp) {
-      throw new Error('La biblioth\u00e8que Firebase ne s\'est pas charg\u00e9e. V\u00e9rifiez votre connexion internet.');
+  // ── Vérifier que la lib Firebase est chargée — avec retry si scripts encore en cours
+  if (typeof firebase === 'undefined' || !firebase.initializeApp) {
+    // Firebase pas encore chargé : retenter dans 300ms (max 10 tentatives = 3s)
+    _fbInitRetries = (_fbInitRetries || 0) + 1;
+    if (_fbInitRetries <= 10) {
+      console.log('Firebase SDK pas encore prêt, retry ' + _fbInitRetries + '/10...');
+      setTimeout(_fbInit, 300);
+    } else {
+      console.error('Firebase SDK non chargé après 3s. Vérifiez votre connexion.');
+      _fbShowInfo(
+        '\u26d4 Le SDK Firebase ne se charge pas.<br>' +
+        'V\u00e9rifiez votre connexion internet et rechargez la page (F5).',
+        'err'
+      );
     }
+    return;
+  }
+  _fbInitRetries = 0; // Reset compteur si succès
 
+  try {
     _fbApp  = firebase.initializeApp(FIREBASE_CONFIG);
     _fbAuth = firebase.auth();
     _fbDB   = firebase.database();
