@@ -1719,39 +1719,26 @@ function _fbInit() {
                 _proceedAfterPersistence();
               })
               .catch(function(e3) {
-                // Aucune persistance possible — Firebase Auth ne peut pas fonctionner
                 console.error('Firebase: aucune persistance disponible.', e3);
-                _fbShowInfo(
-                  '\u26d4 Firebase Auth ne peut pas fonctionner dans cet environnement.<br>' +
-                  'Le stockage web est bloqu\u00e9 par les param\u00e8tres de s\u00e9curit\u00e9 du navigateur.<br>' +
-                  '<strong>Solutions :</strong><br>' +
-                  '1) Edge → Param\u00e8tres → Confidentialit\u00e9 → Protection du suivi → "De base"<br>' +
-                  '2) Utiliser Google Chrome (recommand\u00e9 pour cette application)',
-                  'err'
-                );
-}); // Ferme le catch(e3)
-          });     // Ferme le catch(e2)
-      });         // Ferme le catch(e1)
+              });
+          });
+      });
 
-    // ── Écouter les changements d'état d'authentification
+    // Écouter les changements d'état d'authentification
     _fbAuth.onAuthStateChanged(function(user) {
       if (user) {
         _fbOnSignedIn(user);
       } else {
-        if (!redirectPending || localStorage.getItem(_FB_REDIRECT_KEY) === null) {
-          _fbOnSignedOut();
-        }
+        _fbOnSignedOut();
       }
     });
 
   } catch(e) {
-    localStorage.removeItem(_FB_REDIRECT_KEY);
     console.error('Firebase init error:', e);
-    _fbShowInfo('❌ Erreur initialisation Firebase : ' + e.message, 'err');
   }
-} // <--- CETTE ACCOLADE FERME LA FONCTION _fbInit()
+} // <--- CETTE ACCOLADE FERME _fbInit()
 
-// --- LES FONCTIONS DE GESTION APRES CONNEXION ---
+// --- FONCTIONS DE GESTION ---
 
 function _fbOnSignedIn(user) {
   if (!_fbDB) return;
@@ -1764,26 +1751,22 @@ function _fbOnSignedIn(user) {
     if (userRole) {
       ROLE = userRole; 
       _fbReady = true;
-      var ls = document.getElementById('login-screen');
-      if (ls) ls.style.display = 'none';
+      document.getElementById('login-screen').style.display = 'none';
       document.getElementById('sidebar').style.display = 'flex';
       document.getElementById('main').style.display = 'flex';
       _updateSyncStatus(true);
       showPage('dashboard');
     } else {
       _fbAuth.signOut();
-      _fbShowInfo('\u26d4 Acc\u00e8s refus\u00e9 : ' + googleEmail + ' n\'est pas autoris\u00e9.', 'err');
+      _fbShowInfo('Accès refusé pour : ' + googleEmail, 'err');
     }
-  }).catch(function(err) {
-    console.error("Erreur Config:", err);
   });
 }
 
 function _fbOnSignedOut() {
   ROLE = null;
   _fbReady = false;
-  var ls = document.getElementById('login-screen');
-  if (ls) ls.style.display = 'flex';
+  document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('sidebar').style.display = 'none';
   document.getElementById('main').style.display = 'none';
   _updateSyncStatus(false);
@@ -1791,18 +1774,9 @@ function _fbOnSignedOut() {
 
 function _fbSignIn() {
   if (!_fbReady) { _fbInit(); }
-  var btn = document.getElementById('btn-google');
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.7'; }
-
   var provider = new firebase.auth.GoogleAuthProvider();
-  provider.addScope('email');
-  provider.addScope('profile');
-  provider.setCustomParameters({ prompt: 'select_account' });
-
-  _fbAuth.signInWithPopup(provider).then(function(result) {
-    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-  }).catch(function(err) {
-    console.warn('Popup bloqué, bascule sur redirect', err);
+  _fbAuth.signInWithPopup(provider).catch(function(err) {
+    console.warn('Popup bloqué, tentative redirect...', err);
     _fbAuth.signInWithRedirect(provider);
   });
 }
