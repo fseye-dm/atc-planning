@@ -2094,10 +2094,30 @@ function _fbWriteToCloud() {
   // Debounce 400ms pour grouper les appels rapides
   if (_fbWriteDebounce) clearTimeout(_fbWriteDebounce);
   _fbWriteDebounce = setTimeout(function() {
-    try {
-      var payload = JSON.parse(_syncPayload());
-      SYNC._fbLastWriteSize = JSON.stringify(payload).length;
-      _fbDB.ref('atcdata').set(payload).then(function() {
+   // --- NOUVEAU CODE CORRECTIF ---
+try {
+  // 1. Récupération des données
+  var rawPayload = JSON.parse(_syncPayload());
+
+  // 2. NETTOYAGE DES CLÉS (Supprime les points "." interdits par Firebase)
+  var payload = JSON.parse(JSON.stringify(rawPayload, function(key, value) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      var replacement = {};
+      for (var k in value) {
+        // Remplace tous les points par des underscores
+        var cleanKey = k.replace(/\./g, '_');
+        replacement[cleanKey] = value[k];
+      }
+      return replacement;
+    }
+    return value;
+  }));
+
+  SYNC._fbLastWriteSize = JSON.stringify(payload).length;
+
+  // 3. Envoi des données nettoyées
+  _fbDB.ref('atcdata').set(payload).then(function() {
+// ------------------------------
         _fbSetCloudBadge('ok', '☁ Synchronisé');
         // Nettoyer le flag offline si lécriture réussit
         try { localStorage.removeItem(SK + '_offline_pending'); } catch(e) {}
