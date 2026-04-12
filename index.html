@@ -305,11 +305,11 @@ textarea{resize:vertical;min-height:60px}
 </style>
 <!-- Firebase SDK (Cloud Sync) — double CDN pour fiabilité Edge/Chrome -->
 <!-- CDN primaire : unpkg (npm mirror, moins filtré par Tracking Prevention) -->
-<script src="https://unpkg.com/firebase@10.8.0/firebase-app-compat.js" 
+<script src="https://unpkg.com/firebase@10.14.1/firebase-app-compat.js" 
   onerror="this.onerror=null;this.src='https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js'"></script>
-<script src="https://unpkg.com/firebase@10.8.0/firebase-auth-compat.js"
+<script src="https://unpkg.com/firebase@10.14.1/firebase-auth-compat.js"
   onerror="this.onerror=null;this.src='https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js'"></script>
-<script src="https://unpkg.com/firebase@10.8.0/firebase-database-compat.js"
+<script src="https://unpkg.com/firebase@10.14.1/firebase-database-compat.js"
   onerror="this.onerror=null;this.src='https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js'"></script>
 </head>
 
@@ -322,11 +322,8 @@ textarea{resize:vertical;min-height:60px}
 
     <!-- BOUTON CONNEXION GOOGLE CLOUD -->
     <div id="google-signin-section" style="margin-bottom:14px;">
-      <!-- Indicateur de config Firebase -->
-      <div id="firebase-config-warning" style="display:none;padding:8px 12px;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;font-size:11px;color:#92400e;margin-bottom:10px;text-align:center;font-weight:600;">
-        ⚠️ Firebase non configuré — le bouton Google ne fonctionnera pas.<br>
-        <span style="font-weight:400;">Remplacez FIREBASE_CONFIG dans index.html et re-publiez sur GitHub.</span>
-      </div>
+      <!-- Bannière config Firebase — masquée car config intégrée directement -->
+      <div id="firebase-config-warning" style="display:none;padding:8px 12px;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;font-size:11px;color:#92400e;margin-bottom:10px;text-align:center;font-weight:600;"></div>
       <button id="btn-google" onclick="_fbSignIn()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px;padding:11px 18px;background:#fff;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;color:#1e293b;transition:all .2s;box-shadow:0 2px 8px rgba(0,0,0,.08);" onmouseover="if(!this.disabled)this.style.borderColor='#1D4ED8'" onmouseout="this.style.borderColor='#e2e8f0'">
         <svg id="btn-google-icon" width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
         <span id="btn-google-label">Se connecter avec Google</span>
@@ -396,8 +393,12 @@ textarea{resize:vertical;min-height:60px}
   <div id="topbar">
     <div class="ptitle" id="ptitle">Dashboard</div>
     <div class="tbr">
-      <span id="sync-badge" class="sync-badge sync-online" style="cursor:pointer;" title="Cliquez pour gérer la synchronisation réseau" onclick="openSyncModal()"><span class="sb-dot"></span>SYNCHRONISE</span>
-      <span id="db-badge" style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;transition:all .3s;background:#f1f5f9;color:#64748b;" title="Base locale — cliquez pour gérer" onclick="openBaseLocale()">&#128452; Base locale</span>
+      <!-- Sync badge: masqué quand Firebase est actif ou profil Chef -->
+      <span id="sync-badge" class="sync-badge sync-online" style="display:none;cursor:pointer;" title="Synchronisation réseau local" onclick="openSyncModal()"><span class="sb-dot"></span>SYNCHRONISE</span>
+      <!-- DB badge: visible DM uniquement -->
+      <span id="db-badge" style="display:none;align-items:center;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;transition:all .3s;background:#f1f5f9;color:#64748b;" title="Base locale — cliquez pour gérer" onclick="openBaseLocale()">&#128452; Base locale</span>
+      <!-- Badge hors-ligne: DM uniquement -->
+      <span id="offline-badge" style="display:none;align-items:center;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;background:#fef3c7;color:#92400e;">&#x1F4F5; Hors-ligne</span>
       <!-- Badge Cloud Firebase -->
       <span id="cloud-badge" style="display:none;align-items:center;gap:5px;padding:4px 11px;border-radius:20px;font-size:11px;font-weight:700;" title="Statut synchronisation Cloud Firebase">
         <span id="cloud-dot" style="width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block;"></span>
@@ -741,7 +742,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v10.7';
+var APP_VERSION = 'v11.0';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -758,13 +759,23 @@ var FIREBASE_CONFIG = {
   storageBucket:     "dm-planning-soseter.firebasestorage.app",
   messagingSenderId: "1076715112896",
   appId:             "1:1076715112896:web:fe7c74575c6e31a83ce025",
-  clientId: "1076715112896-daf9o5p25d0jjijk1rjfnkt4jg6jqmu1.apps.googleusercontent.com"
+  clientId:          "1076715112896-daf9o5p25d0jjijk1rjfnkt4jg6jqmu1.apps.googleusercontent.com"
 };
 
-// Emails autorisés → profil automatique
+// ── Emails autorisés — chargés depuis Firebase /config ou valeurs par défaut
+// Ces valeurs sont remplacées dynamiquement si /config existe dans Firebase
 var FIREBASE_AUTH_EMAILS = {
-  "fseye2018@gmail.com":       "dm",    // Directeur Matériel
-  "souleyecisse017@gmail.com":  "chef"   // Chef d'Atelier
+  "fseye2018@gmail.com":      "dm",
+  "souleye017@gmail.com": "chef"
+};
+
+// ── Configuration dynamique (chargée depuis Firebase /config)
+var APP_CONFIG = {
+  company:    "SOSETER HYDRO",
+  logoUrl:    "",
+  dmName:     "F. SEYE",
+  chefName:   "Souleye Cissé",
+  version:    "v11.0"
 };
 
 // Instances Firebase (initialisées par _fbInit)
@@ -1000,13 +1011,30 @@ function _activeEquips() {
 }
 
 function saveApp() {
-  // S'assurer que fieldTs est initialisé avant sauvegarde
+  if (!APP.fieldTs) APP.fieldTs = {};
+  var json = JSON.stringify(APP);
+  // Persistance locale multi-couche (mode hors-ligne + Edge F5)
+  try { localStorage.setItem(SK, json); } catch(e) {}
+  try { sessionStorage.setItem(SK, json); } catch(e) {}
+  _idbSave(SK, json);
+  // Firebase First : si connecté, écriture immédiate sans attendre SYNC.active
+  if (_fbReady && _fbDB) {
+    _fbWriteToCloud();
+  } else {
+    // Fallback : sync réseau local uniquement pour profil DM
+    _syncWrite();
+  }
+}
+
+// Sauvegarde silencieuse offline (sans déclencher sync réseau)
+function _saveLocalOnly() {
   if (!APP.fieldTs) APP.fieldTs = {};
   var json = JSON.stringify(APP);
   try { localStorage.setItem(SK, json); } catch(e) {}
   try { sessionStorage.setItem(SK, json); } catch(e) {}
   _idbSave(SK, json);
-  _syncWrite();
+  // Marquer qu'il y a des données hors-ligne à remonter
+  try { localStorage.setItem(SK + '_offline_pending', '1'); } catch(e) {}
 }
 
 // Marquer un champ comme modifié par le profil courant (pour Smart Merge)
@@ -1533,12 +1561,8 @@ function _fbInit() {
   if (_fbApp) return;
 
   // ── Vérifier que la config est remplie
-  if (!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey === 'VOTRE_API_KEY_ICI') {
-    console.warn('DM-PLANNING: Firebase non configuré. Mode local uniquement.');
-    var w = document.getElementById('firebase-config-warning');
-    if (w) w.style.display = 'block';
-    var btn = document.getElementById('btn-google');
-    if (btn) { btn.style.opacity = '0.45'; btn.style.cursor = 'not-allowed'; btn.title = 'Firebase non configuré'; }
+  if (!FIREBASE_CONFIG.apiKey) {
+    console.warn('DM-PLANNING: Firebase apiKey manquante.');
     return;
   }
 
@@ -1650,7 +1674,11 @@ function _fbSignIn() {
 
   var provider = new firebase.auth.GoogleAuthProvider();
   provider.addScope('email');
-  provider.setCustomParameters({ prompt: 'select_account' });
+  provider.addScope('profile');
+  provider.setCustomParameters({
+    prompt:    'select_account',
+    client_id: FIREBASE_CONFIG.clientId || ''
+  });
 
   // ── Stratégie : Popup d'abord (instantané) → fallback Redirect si bloqué
   _fbAuth.signInWithPopup(provider).then(function(result) {
@@ -1719,6 +1747,79 @@ function _fbSignIn() {
   });
 }
 
+// ══ Admin: Sauvegarder la configuration dans Firebase /config ══
+function saveFirebaseConfig() {
+  var dmEmail   = (document.getElementById('cfg-dm-email')   || {}).value   || '';
+  var chefEmail = (document.getElementById('cfg-chef-email') || {}).value   || '';
+  var company   = (document.getElementById('cfg-company')    || {}).value   || '';
+  var dmName    = (document.getElementById('cfg-dm-name')    || {}).value   || '';
+  var chefName  = (document.getElementById('cfg-chef-name')  || {}).value   || '';
+  var logoUrl   = (document.getElementById('cfg-logo-url')   || {}).value   || '';
+  var status    = document.getElementById('cfg-save-status');
+
+  if (!_fbReady || !_fbDB) {
+    if (status) status.innerHTML = '<span style="color:#ef4444;">⛔ Firebase non connecté — connectez-vous d’abord.</span>';
+    return;
+  }
+  if (!dmEmail || !chefEmail) {
+    if (status) status.innerHTML = '<span style="color:#ef4444;">⚠️ Saisissez les deux adresses email.</span>';
+    return;
+  }
+
+  var emails = {};
+  emails[dmEmail]   = 'dm';
+  emails[chefEmail] = 'chef';
+
+  var cfg = { emails: emails, company: company, dmName: dmName, chefName: chefName, logoUrl: logoUrl, updatedAt: Date.now() };
+
+  if (status) status.innerHTML = '⏳ Sauvegarde en cours...';
+  _fbDB.ref('config').set(cfg).then(function() {
+    // Appliquer localement immédiatement
+    FIREBASE_AUTH_EMAILS = {};
+    FIREBASE_AUTH_EMAILS[dmEmail]   = 'dm';
+    FIREBASE_AUTH_EMAILS[chefEmail] = 'chef';
+    APP_CONFIG.company  = company;
+    APP_CONFIG.dmName   = dmName;
+    APP_CONFIG.chefName = chefName;
+    APP_CONFIG.logoUrl  = logoUrl;
+    if (status) status.innerHTML = '<span style="color:#10b981;">✅ Configuration sauvegardée dans Firebase.</span>';
+    toast('☁ Configuration mise à jour dans Firebase.');
+  }).catch(function(err) {
+    if (status) status.innerHTML = '<span style="color:#ef4444;">❌ Erreur : ' + err.message + '</span>';
+  });
+}
+
+// ══ Admin: Recharger la configuration depuis Firebase /config ══
+function loadFirebaseConfig() {
+  if (!_fbReady || !_fbDB) { toast('⛔ Firebase non connecté.'); return; }
+  var status = document.getElementById('cfg-save-status');
+  if (status) status.innerHTML = '⏳ Chargement...';
+  _fbDB.ref('config').once('value').then(function(snap) {
+    var cfg = snap.val();
+    if (!cfg) { if (status) status.innerHTML = '<span style="color:#f59e0b;">⚠️ Aucune configuration dans Firebase.</span>'; return; }
+    if (cfg.emails) {
+      Object.keys(cfg.emails).forEach(function(em) {
+        var role = cfg.emails[em];
+        var inputId = role === 'dm' ? 'cfg-dm-email' : 'cfg-chef-email';
+        var el = document.getElementById(inputId);
+        if (el) el.value = em;
+        FIREBASE_AUTH_EMAILS[em] = role;
+      });
+    }
+    var fields = {company:'cfg-company',dmName:'cfg-dm-name',chefName:'cfg-chef-name',logoUrl:'cfg-logo-url'};
+    Object.keys(fields).forEach(function(key) {
+      if (cfg[key]) {
+        APP_CONFIG[key] = cfg[key];
+        var el = document.getElementById(fields[key]);
+        if (el) el.value = cfg[key];
+      }
+    });
+    if (status) status.innerHTML = '<span style="color:#10b981;">✅ Configuration rechargée depuis Firebase.</span>';
+  }).catch(function(err) {
+    if (status) status.innerHTML = '<span style="color:#ef4444;">❌ ' + err.message + '</span>';
+  });
+}
+
 // Déconnexion
 function _fbSignOut() {
   if (_fbAuth) _fbAuth.signOut();
@@ -1775,45 +1876,109 @@ function _fbOnSignedOut() {
 // Démarrer la synchronisation Firebase (écoute temps réel)
 function _fbStartSync(role) {
   if (!_fbDB) return;
-  _fbStopListener(); // Arrêter l'ancien listener si actif
+  _fbStopListener();
   SYNC.active = true;
-  SYNC.httpMode = false; // Firebase remplace le polling HTTP
+  SYNC.httpMode = false;
   _fbSetCloudBadge('syncing', '☁ Connexion...');
 
-  // Lire une fois immédiatement
+  // ── Charger la configuration dynamique (/config) ───
+  _fbDB.ref('config').once('value').then(function(cSnap) {
+    var cfg = cSnap.val();
+    if (cfg) {
+      // Mettre à jour les emails autorisés depuis Firebase
+      if (cfg.emails) {
+        FIREBASE_AUTH_EMAILS = {};
+        Object.keys(cfg.emails).forEach(function(em) {
+          FIREBASE_AUTH_EMAILS[em] = cfg.emails[em];
+        });
+      }
+      // Mettre à jour la configuration générale
+      if (cfg.company) APP_CONFIG.company = cfg.company;
+      if (cfg.logoUrl)  APP_CONFIG.logoUrl  = cfg.logoUrl;
+      if (cfg.dmName)   APP_CONFIG.dmName   = cfg.dmName;
+      if (cfg.chefName) APP_CONFIG.chefName = cfg.chefName;
+    }
+  }).catch(function(e) { console.warn('Firebase /config load:', e.message); });
+
+  // ── Masquer les éléments non pertinents quand Firebase est actif ───
+  _fbHideLocalSyncUI(role);
+
+  // ── Silent upload des données offline en attente ───
+  _fbSilentUploadOffline();
+
+  // ── Lire une fois au démarrage (Single Source of Truth) ───
   _fbDB.ref('atcdata').once('value').then(function(snap) {
     var remote = snap.val();
     if (remote && typeof remote === 'object') {
       try {
         var changed = _syncMerge(remote);
-        if (changed) { saveApp(); autoRefreshUI(); }
-      } catch(e) { console.error('Firebase merge error:', e); }
+        if (changed) { _saveLocalOnly(); autoRefreshUI(); }
+      } catch(e) { console.error('Firebase merge:', e); }
     } else {
-      // Première utilisation : écrire les données par défaut
       _fbWriteToCloud();
     }
-    _fbSetCloudBadge('ok', '☁ Sync Cloud');
+    _fbSetCloudBadge('ok', '☁ Cloud');
   }).catch(function(err) {
     _fbSetCloudBadge('error', '☁ Erreur');
-    console.error('Firebase read error:', err);
+    console.error('Firebase read:', err);
   });
 
-  // Écoute temps réel des changements distants
+  // ── Écoute temps réel — Single Source of Truth ───
   _fbListener = _fbDB.ref('atcdata').on('value', function(snap) {
     var remote = snap.val();
     if (!remote) return;
-    // Éviter de traiter notre propre écriture (comparer hash)
-    var remHash = JSON.stringify(remote).length; // heuristique rapide
+    var remHash = JSON.stringify(remote).length;
     if (remHash === SYNC._fbLastWriteSize) return;
     try {
       var changed = _syncMerge(remote);
-      if (changed) { saveApp(); autoRefreshUI(); }
-    } catch(e) { console.error('Firebase realtime merge error:', e); }
+      if (changed) {
+        _saveLocalOnly();
+        // Recalcul KPI/Dashboard en temps réel
+        autoRefreshUI();
+        _fbRefreshKPIs();
+      }
+    } catch(e) { console.error('Firebase realtime merge:', e); }
     _fbSetCloudBadge('ok', '☁ Synchronisé');
   }, function(err) {
     _fbSetCloudBadge('error', '☁ Erreur');
-    console.error('Firebase listener error:', err);
+    console.error('Firebase listener:', err);
   });
+}
+
+// Masquer les éléments UI liés au fichier local quand Firebase est actif
+function _fbHideLocalSyncUI(role) {
+  // Banniere "Connecter fichier sync" — masquée en mode Cloud
+  var syncBadge = document.getElementById('sync-badge');
+  if (syncBadge) syncBadge.style.display = 'none';
+  // Badge "Base locale" — réservé exclusivement au profil DM
+  var dbBadge = document.getElementById('db-badge');
+  if (dbBadge) dbBadge.style.display = (role === 'dm') ? 'inline-flex' : 'none';
+  // Badge "Non connecté" — masqué quand Firebase est actif
+  var offBadge = document.getElementById('offline-badge');
+  if (offBadge) offBadge.style.display = 'none';
+}
+
+// Upload silencieux des données offline vers Firebase
+function _fbSilentUploadOffline() {
+  try {
+    var pending = localStorage.getItem(SK + '_offline_pending');
+    if (!pending) return;
+    // Il y a des données saisies hors-ligne — les pousser vers Firebase
+    console.log('Firebase: silent upload of offline data');
+    _fbWriteToCloud();
+    localStorage.removeItem(SK + '_offline_pending');
+    toast('☁ Données hors-ligne synchronisées avec Firebase.');
+  } catch(e) { console.warn('Silent upload:', e); }
+}
+
+// Recalcul KPI/Dashboard en temps réel après mise à jour Firebase
+function _fbRefreshKPIs() {
+  var pg = document.getElementById('ptitle');
+  if (!pg) return;
+  var title = pg.textContent || '';
+  if (title.indexOf('Dashboard') > -1 || title.indexOf('dashboard') > -1) {
+    try { renderDash(); } catch(e) {}
+  }
 }
 
 // Arrêter l'écoute Firebase
@@ -1824,18 +1989,35 @@ function _fbStopListener() {
   }
 }
 
-// Écriture vers Firebase Cloud
+// Écriture Firebase — indépendante de SYNC.active (Firebase First)
 SYNC._fbLastWriteSize = 0;
+var _fbWriteDebounce = null;
 function _fbWriteToCloud() {
-  if (!_fbDB || !_fbReady) return;
-  var payload = JSON.parse(_syncPayload()); // objet JS depuis le JSON payload
-  SYNC._fbLastWriteSize = JSON.stringify(payload).length;
-  _fbDB.ref('atcdata').set(payload).then(function() {
-    _fbSetCloudBadge('ok', '☁ Synchronisé');
-  }).catch(function(err) {
-    _fbSetCloudBadge('error', '☁ Erreur écriture');
-    console.error('Firebase write error:', err);
-  });
+  if (!_fbDB || !_fbReady) {
+    // Pas de Firebase : stocker localement et marquer offline
+    _saveLocalOnly();
+    return;
+  }
+  // Debounce 400ms pour grouper les appels rapides
+  if (_fbWriteDebounce) clearTimeout(_fbWriteDebounce);
+  _fbWriteDebounce = setTimeout(function() {
+    try {
+      var payload = JSON.parse(_syncPayload());
+      SYNC._fbLastWriteSize = JSON.stringify(payload).length;
+      _fbDB.ref('atcdata').set(payload).then(function() {
+        _fbSetCloudBadge('ok', '☁ Synchronisé');
+        // Nettoyer le flag offline si lécriture réussit
+        try { localStorage.removeItem(SK + '_offline_pending'); } catch(e) {}
+      }).catch(function(err) {
+        _fbSetCloudBadge('error', '☁ Erreur écriture');
+        // Conserver localement en cas déchec
+        _saveLocalOnly();
+        console.error('Firebase write:', err);
+      });
+    } catch(e) {
+      console.error('Firebase write prep:', e);
+    }
+  }, 400);
 }
 
 // Badge Cloud dans le topbar
@@ -1858,9 +2040,10 @@ function _fbSetCloudBadge(status, label) {
 // ── Override de _syncWrite pour intégrer Firebase ─────────────
 // Write APP to shared file
 function _syncWrite() {
-  // Priorité Firebase Cloud si connecté
-  if (_fbReady && _fbDB && SYNC.active) {
+  // Firebase First : écriture immédiate si connecté, indépendante de SYNC.active
+  if (_fbReady && _fbDB) {
     _fbWriteToCloud();
+    return; // Firebase gère tout, pas besoin du reste
   }
 
   // FSAPI (écriture directe fichier réseau — mode local)
@@ -2931,6 +3114,28 @@ function _sessionRestore() {
   });
 }
 
+// Appliquer l'affichage selon le profil (DM ou Chef)
+function _applyRoleUI(role) {
+  var isDM = (role === 'dm');
+  // Badge "Base locale" — DM uniquement
+  var dbBadge = document.getElementById('db-badge');
+  if (dbBadge) dbBadge.style.display = isDM ? 'inline-flex' : 'none';
+  // Badge "Sync réseau" — masqué quand Firebase est actif
+  var syncBadge = document.getElementById('sync-badge');
+  if (syncBadge) {
+    syncBadge.style.display = (_fbReady && _fbDB) ? 'none' : (isDM ? 'inline-flex' : 'none');
+  }
+  // Badge "Non connecté" — masqué pour le Chef
+  var offBadge = document.getElementById('offline-badge');
+  if (offBadge) offBadge.style.display = isDM ? 'inline-flex' : 'none';
+  // Navigation Admin — DM uniquement
+  var adminNav = document.getElementById('adminNav');
+  if (adminNav) adminNav.style.display = isDM ? 'block' : 'none';
+  // Panneau config Firebase — DM uniquement
+  var fbConfigPanel = document.getElementById('fb-config-panel');
+  if (fbConfigPanel) fbConfigPanel.style.display = isDM ? 'block' : 'none';
+}
+
 function _applyLogin(role, saveSession) {
   ROLE = role;
   if (saveSession !== false) _sessionSave(role);
@@ -2938,7 +3143,9 @@ function _applyLogin(role, saveSession) {
   document.getElementById('sidebar').style.display = 'flex';
   document.getElementById('main').style.display = 'flex';
   document.getElementById('lerr').style.display = 'none';
-  var nm = ROLE === 'dm' ? 'Directeur Materiel' : 'Souleye Cisse';
+  var nm = ROLE === 'dm' ? APP_CONFIG.dmName : APP_CONFIG.chefName;
+  // Masquer les boutons non pertinents selon le profil
+  _applyRoleUI(ROLE);
   document.getElementById('topuser').textContent = nm;
   document.getElementById('sw-user').textContent = nm;
   if (ROLE === 'dm') {
@@ -3516,7 +3723,67 @@ function buildAdminPage() {
   APP.agents.forEach(function(a) { if (a.metier && metiers.indexOf(a.metier) === -1) metiers.push(a.metier); });
 
   // Sync status
-  var syncStatusHtml = '';
+  // ═══════════════════════════════════════════════════════
+// Panneau Administration Firebase (DM uniquement)
+// ═══════════════════════════════════════════════════════
+var fbAdminHtml = '';
+if (ROLE === 'dm') {
+  var curEmails = Object.keys(FIREBASE_AUTH_EMAILS).map(function(em) {
+    return em + ' (' + (FIREBASE_AUTH_EMAILS[em] === 'dm' ? 'DM' : 'Chef') + ')';
+  }).join(' | ');
+  var fbStatus = (_fbReady && _fbDB)
+    ? '<span style="color:#10b981;font-weight:700;">\u2705 Connect\u00e9 \u2014 ' + (_fbAuth && _fbAuth.currentUser ? _fbAuth.currentUser.email : '') + '</span>'
+    : '<span style="color:#ef4444;font-weight:700;">\u26d4 Non connect\u00e9</span>';
+
+  fbAdminHtml =
+    '<div id="fb-config-panel" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:16px;">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">' +
+        '<span style="font-size:18px;">\uD83D\uDD25</span>' +
+        '<h3 style="margin:0;font-size:13px;color:#0a1628;font-weight:800;">Configuration Firebase Cloud</h3>' +
+        '<span style="margin-left:auto;font-size:11px;">' + fbStatus + '</span>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">' +
+        '<div>' +
+          '<label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px;">Email Directeur Mat\u00e9riel</label>' +
+          '<input id="cfg-dm-email" type="email" value="' + (Object.keys(FIREBASE_AUTH_EMAILS).find(function(e){return FIREBASE_AUTH_EMAILS[e]==="dm";}) || '') + '" ' +
+            'style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;" placeholder="email@gmail.com">' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px;">Email Chef d\u2019Atelier</label>' +
+          '<input id="cfg-chef-email" type="email" value="' + (Object.keys(FIREBASE_AUTH_EMAILS).find(function(e){return FIREBASE_AUTH_EMAILS[e]==="chef";}) || '') + '" ' +
+            'style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;" placeholder="email@soseter.com">' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px;">Nom entreprise</label>' +
+          '<input id="cfg-company" type="text" value="' + APP_CONFIG.company + '" ' +
+            'style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;">' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px;">Nom DM</label>' +
+          '<input id="cfg-dm-name" type="text" value="' + APP_CONFIG.dmName + '" ' +
+            'style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;">' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px;">Nom Chef d\u2019Atelier</label>' +
+          '<input id="cfg-chef-name" type="text" value="' + APP_CONFIG.chefName + '" ' +
+            'style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;">' +
+        '</div>' +
+        '<div>' +
+          '<label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px;">URL Logo (optionnel)</label>' +
+          '<input id="cfg-logo-url" type="url" value="' + APP_CONFIG.logoUrl + '" ' +
+            'style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;" placeholder="https://...">' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<button class="btn bp sm" style="background:#7c3aed;color:#fff;" onclick="saveFirebaseConfig()">\uD83D\uDCBE Sauvegarder dans Firebase</button>' +
+        '<button class="btn bs sm" onclick="loadFirebaseConfig()">\uD83D\uDD04 Recharger depuis Firebase</button>' +
+        '<button class="btn bs sm" style="color:#ef4444;" onclick="_fbSignOut();toast(\'D\u00e9connexion effectu\u00e9e.\');">Se d\u00e9connecter</button>' +
+      '</div>' +
+      '<div id="cfg-save-status" style="font-size:11px;margin-top:8px;"></div>' +
+    '</div>';
+}
+
+var syncStatusHtml = '';
   var sColors = { ok:'#10b981', syncing:'#3b82f6', error:'#ef4444', permission:'#eab308', inactive:'#94a3b8', conflict:'#f97316' };
   var sc = sColors[SYNC.status] || '#94a3b8';
   var syncLabels = {
@@ -3565,6 +3832,8 @@ function buildAdminPage() {
         '3\uFE0F\u20E3 Polling toutes les <strong>5 secondes</strong>. Priorit\u00E9 DM en cas de conflit.<br>' +
         '<strong style="color:#dc2626;">\u26A0 Apr\u00E8s redémarrage du navigateur</strong> : cliquez <strong>"Reconnecter"</strong> (sécurité navigateur — inévitable mais automatisé à la connexion).' +
       '</div>' +
+
+      fbAdminHtml +
 
       syncStatusHtml +
 
@@ -4509,7 +4778,7 @@ function renderDash() {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } }, scales: { x: { ticks: { font: { size: 9 } } }, y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
   });
 
-  var h8 = APP.hist.slice(0,8).reverse();
+  var h8 = APP.hist.slice().reverse().slice(0,8);
   new Chart(document.getElementById('chartR'), {
     type: 'line',
     data: {
@@ -6104,8 +6373,8 @@ window.addEventListener('load', function() {
   setTimeout(_syncRestoreHandle, 600);
   setTimeout(_sessionRestore, 100);
   setTimeout(_dbRestoreHandle, 400);
-  // Initialiser Firebase au chargement (si config remplie)
-  setTimeout(_fbInit, 200);
+  // Initialiser Firebase immédiatement (config intégrée directement)
+  _fbInit();
 });
 
 // Init sync badge
