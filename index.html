@@ -1729,16 +1729,15 @@ function _fbInit() {
                   '2) Utiliser Google Chrome (recommand\u00e9 pour cette application)',
                   'err'
                 );
-              });
-          });
-      });
+}); // Ferme le catch(e3)
+          });     // Ferme le catch(e2)
+      });         // Ferme le catch(e1)
 
-// ── Écouter les changements d'état d'authentification
+    // ── Écouter les changements d'état d'authentification
     _fbAuth.onAuthStateChanged(function(user) {
       if (user) {
         _fbOnSignedIn(user);
       } else {
-        // Ne signaler "déconnecté" que si on ne venait pas d'un redirect en cours
         if (!redirectPending || localStorage.getItem(_FB_REDIRECT_KEY) === null) {
           _fbOnSignedOut();
         }
@@ -1750,7 +1749,7 @@ function _fbInit() {
     console.error('Firebase init error:', e);
     _fbShowInfo('❌ Erreur initialisation Firebase : ' + e.message, 'err');
   }
-}
+} // <--- CETTE ACCOLADE FERME LA FONCTION _fbInit()
 
 // --- LES FONCTIONS DE GESTION APRES CONNEXION ---
 
@@ -1759,7 +1758,6 @@ function _fbOnSignedIn(user) {
   _fbDB.ref('config').once('value').then(function(snapshot) {
     var config = snapshot.val();
     var googleEmail = user.email;
-    // On transforme le point en underscore pour correspondre à la base
     var firebaseKey = googleEmail.replace(/\./g, '_'); 
     var userRole = (config && config.emails) ? config.emails[firebaseKey] : null;
 
