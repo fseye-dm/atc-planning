@@ -1733,23 +1733,44 @@ function _fbInit() {
           });
       });
 
-    // ── Écouter les changements d'état d'authentification
-    _fbAuth.onAuthStateChanged(function(user) {
-      if (user) {
-        _fbOnSignedIn(user);
-      } else {
-        // Ne signaler "déconnecté" que si on ne venait pas d'un redirect en cours
-        if (!redirectPending || localStorage.getItem(_FB_REDIRECT_KEY) === null) {
-          _fbOnSignedOut();
-        }
-      }
-    });
+   function _fbOnSignedIn(user) {
+  if (!_fbDB) return;
 
-  } catch(e) {
-    localStorage.removeItem(_FB_REDIRECT_KEY);
-    console.error('Firebase init error:', e);
-    _fbShowInfo('❌ Erreur initialisation Firebase : ' + e.message, 'err');
-  }
+  // 1. Récupérer la configuration (qui contient les emails avec _)
+  _fbDB.ref('config').once('value').then(function(snapshot) {
+    var config = snapshot.val();
+    
+    // 2. NETTOYAGE : transforme "nom.prenom@gmail.com" en "nom_prenom@gmail_com"
+    var googleEmail = user.email;
+    var firebaseKey = googleEmail.replace(/\./g, '_'); 
+
+    // 3. Vérification du rôle
+    var userRole = (config && config.emails) ? config.emails[firebaseKey] : null;
+
+    if (userRole) {
+      console.log("Accès autorisé :", googleEmail, "Rôle :", userRole);
+      ROLE = userRole; 
+      _fbReady = true;
+
+      // Affichage de l'interface
+      var loginScreen = document.getElementById('login-screen');
+      if (loginScreen) loginScreen.style.display = 'none';
+      document.getElementById('sidebar').style.display = 'flex';
+      document.getElementById('main').style.display = 'flex';
+      
+      _updateSyncStatus(true);
+      showPage('dashboard');
+      toast('Bienvenue, ' + googleEmail);
+    } else {
+      // Si l'email nettoyé n'est pas trouvé
+      console.error("Accès refusé :", firebaseKey, "introuvable.");
+      _fbAuth.signOut();
+      _fbShowInfo('\u26d4 Acc\u00e8s refus\u00e9 : ' + googleEmail + ' n\'est pas autoris\u00e9.', 'err');
+    }
+  }).catch(function(err) {
+    console.error("Erreur Firebase Config:", err);
+    _fbShowInfo('Erreur de connexion à la base de données.', 'err');
+  });
 }
 
 // Connexion Google — Popup (Chrome) avec fallback Redirect (Edge)
@@ -2085,12 +2106,19 @@ function _fbStopListener() {
 // Écriture Firebase — indépendante de SYNC.active (Firebase First)
 SYNC._fbLastWriteSize = 0;
 var _fbWriteDebounce = null;
-function _fbWriteToCloud() {
-  if (!_fbDB || !_fbReady) {
-    // Pas de Firebase : stocker localement et marquer offline
-    _saveLocalOnly();
-    return;
-  }
+function _fbWriteToCloud(data) {
+  if (!_fbDB || !_fbAuth.currentUser) return;
+  
+  // Toujours nettoyer l'e-mail avant d'écrire dans Firebase
+  var userKey = _fbAuth.currentUser.email.replace(/\./g, '_');
+  
+  _fbDB.ref('data/' + userKey).set({
+    lastUpdate: firebase.database.ServerValue.TIMESTAMP,
+    payload: data
+  }).then(function() {
+    console.log("Sauvegarde Cloud réussie");
+  });
+}
   // Debounce 400ms pour grouper les appels rapides
   if (_fbWriteDebounce) clearTimeout(_fbWriteDebounce);
   _fbWriteDebounce = setTimeout(function() {
@@ -2819,16 +2847,15 @@ function openBaseLocale() {
 }
 
 function openSyncModal() {
-  // Si Firebase est actif → afficher le statut Cloud au lieu des options fichier local
   if (_fbReady && _fbDB) {
-    var user = (_fbAuth && _fbAuth.currentUser) ? _fbAuth.currentUser.email : 'Inconnu';
-    toast('\u2601 Firebase actif — connect\u00e9 en tant que ' + user + '. Synchronisation temps r\u00e9el via Firebase Realtime Database.');
+    var userRaw = (_fbAuth && _fbAuth.currentUser) ? _fbAuth.currentUser.email : 'Inconnu';
+    // On remplace l'underscore par un point juste pour l'affichage visuel
+    var userDisplay = userRaw.replace(/_/g, '.');
+    toast('\u2601 Firebase actif — connect\u00e9 en tant que ' + userDisplay + '. Synchronisation temps r\u00e9el.');
     return;
   }
-  // Mode local uniquement (DM sans connexion Firebase)
   showPage('admin');
 }
-
 
 function _syncUpdateModalUI() {
   var sColors = { ok:'#10b981', syncing:'#3b82f6', error:'#ef4444', permission:'#eab308', inactive:'#94a3b8', conflict:'#f97316' };
