@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -6,7 +7,7 @@
 <title>DM-PLANNING v8 | Direction Matériel Planning — SOSETER HYDRO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script type="text/javascript" src="https://me.kis.v2.scr.kaspersky-labs.com/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js?attr=VZK8tmkSIeCvoBTw__0-7eLIV39Ey2RpdjGjT3xMPIFwyIKAWP5UJad6DZSh5xIeAUeSD6CggVc7dHfLzAhXYw" charset="UTF-8"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
@@ -1740,46 +1741,6 @@ function _fbInit() {
 
 // --- FONCTIONS DE GESTION ---
 
-function _fbOnSignedIn(user) {
-  if (!_fbDB) return;
-  _fbDB.ref('config').once('value').then(function(snapshot) {
-    var config = snapshot.val();
-    var googleEmail = user.email;
-    var firebaseKey = googleEmail.replace(/\./g, '_'); 
-    var userRole = (config && config.emails) ? config.emails[firebaseKey] : null;
-
-    if (userRole) {
-      ROLE = userRole; 
-      _fbReady = true;
-      document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('sidebar').style.display = 'flex';
-      document.getElementById('main').style.display = 'flex';
-      _updateSyncStatus(true);
-      showPage('dashboard');
-    } else {
-      _fbAuth.signOut();
-      _fbShowInfo('Accès refusé pour : ' + googleEmail, 'err');
-    }
-  });
-}
-
-function _fbOnSignedOut() {
-  ROLE = null;
-  _fbReady = false;
-  document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('sidebar').style.display = 'none';
-  document.getElementById('main').style.display = 'none';
-  _updateSyncStatus(false);
-}
-
-function _fbSignIn() {
-  if (!_fbReady) { _fbInit(); }
-  var provider = new firebase.auth.GoogleAuthProvider();
-  _fbAuth.signInWithPopup(provider).catch(function(err) {
-    console.warn('Popup bloqué, tentative redirect...', err);
-    _fbAuth.signInWithRedirect(provider);
-  });
-}
 
 // Connexion Google — Popup (Chrome) avec fallback Redirect (Edge)
 function _fbSignIn() {
@@ -2114,52 +2075,37 @@ function _fbStopListener() {
 // Écriture Firebase — indépendante de SYNC.active (Firebase First)
 SYNC._fbLastWriteSize = 0;
 var _fbWriteDebounce = null;
-function _fbWriteToCloud(data) {
-  if (!_fbDB || !_fbAuth.currentUser) return;
-  
-  // Toujours nettoyer l'e-mail avant d'écrire dans Firebase
-  var userKey = _fbAuth.currentUser.email.replace(/\./g, '_');
-  
-  _fbDB.ref('data/' + userKey).set({
-    lastUpdate: firebase.database.ServerValue.TIMESTAMP,
-    payload: data
-  }).then(function() {
-    console.log("Sauvegarde Cloud réussie");
-  });
-}
-  // Debounce 400ms pour grouper les appels rapides
+
+function _fbWriteToCloud() {
+  if (!_fbDB || !_fbAuth || !_fbAuth.currentUser) return;
+
+  // Debounce 400ms — grouper les appels rapides
   if (_fbWriteDebounce) clearTimeout(_fbWriteDebounce);
   _fbWriteDebounce = setTimeout(function() {
-   // --- NOUVEAU CODE CORRECTIF ---
-try {
-  // 1. Récupération des données
-  var rawPayload = JSON.parse(_syncPayload());
+    try {
+      var rawPayload = JSON.parse(_syncPayload());
 
-  // 2. NETTOYAGE DES CLÉS (Supprime les points "." interdits par Firebase)
-  var payload = JSON.parse(JSON.stringify(rawPayload, function(key, value) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      var replacement = {};
-      for (var k in value) {
-        // Remplace tous les points par des underscores
-        var cleanKey = k.replace(/\./g, '_');
-        replacement[cleanKey] = value[k];
-      }
-      return replacement;
-    }
-    return value;
-  }));
+      // Nettoyer les clés — Firebase interdit les "." dans les clés
+      var payload = JSON.parse(JSON.stringify(rawPayload, function(key, value) {
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          var replacement = {};
+          for (var k in value) {
+            var cleanKey = k.replace(/\./g, '_');
+            replacement[cleanKey] = value[k];
+          }
+          return replacement;
+        }
+        return value;
+      }));
 
-  SYNC._fbLastWriteSize = JSON.stringify(payload).length;
+      SYNC._fbLastWriteSize = JSON.stringify(payload).length;
 
-  // 3. Envoi des données nettoyées
-  _fbDB.ref('atcdata').set(payload).then(function() {
-// ------------------------------
+      // Écriture dans Firebase Realtime Database
+      _fbDB.ref('atcdata').set(payload).then(function() {
         _fbSetCloudBadge('ok', '☁ Synchronisé');
-        // Nettoyer le flag offline si lécriture réussit
         try { localStorage.removeItem(SK + '_offline_pending'); } catch(e) {}
       }).catch(function(err) {
         _fbSetCloudBadge('error', '☁ Erreur écriture');
-        // Conserver localement en cas déchec
         _saveLocalOnly();
         console.error('Firebase write:', err);
       });
@@ -6407,12 +6353,8 @@ if (rptComment) {
 }
 
 // --- INITIALISATION FINALE ---
-window.onload = function() {
-  // On tente d'initialiser Firebase au chargement
-  if (typeof _fbInit === 'function') {
-    _fbInit();
-  }
-};
+// Firebase initialise via _loadFirebaseSDK dans addEventListener('load',...)
+// Ne pas dupliquer ici — double _fbInit() corrompt l'état Firebase.
 
 </script>
 </body>
