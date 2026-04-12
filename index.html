@@ -1733,43 +1733,79 @@ function _fbInit() {
           });
       });
 
-   function _fbOnSignedIn(user) {
-  if (!_fbDB) return;
+// ── Écouter les changements d'état d'authentification
+    _fbAuth.onAuthStateChanged(function(user) {
+      if (user) {
+        _fbOnSignedIn(user);
+      } else {
+        // Ne signaler "déconnecté" que si on ne venait pas d'un redirect en cours
+        if (!redirectPending || localStorage.getItem(_FB_REDIRECT_KEY) === null) {
+          _fbOnSignedOut();
+        }
+      }
+    });
 
-  // 1. Récupérer la configuration (qui contient les emails avec _)
+  } catch(e) {
+    localStorage.removeItem(_FB_REDIRECT_KEY);
+    console.error('Firebase init error:', e);
+    _fbShowInfo('❌ Erreur initialisation Firebase : ' + e.message, 'err');
+  }
+}
+
+// --- LES FONCTIONS DE GESTION APRES CONNEXION ---
+
+function _fbOnSignedIn(user) {
+  if (!_fbDB) return;
   _fbDB.ref('config').once('value').then(function(snapshot) {
     var config = snapshot.val();
-    
-    // 2. NETTOYAGE : transforme "nom.prenom@gmail.com" en "nom_prenom@gmail_com"
     var googleEmail = user.email;
+    // On transforme le point en underscore pour correspondre à la base
     var firebaseKey = googleEmail.replace(/\./g, '_'); 
-
-    // 3. Vérification du rôle
     var userRole = (config && config.emails) ? config.emails[firebaseKey] : null;
 
     if (userRole) {
-      console.log("Accès autorisé :", googleEmail, "Rôle :", userRole);
       ROLE = userRole; 
       _fbReady = true;
-
-      // Affichage de l'interface
-      var loginScreen = document.getElementById('login-screen');
-      if (loginScreen) loginScreen.style.display = 'none';
+      var ls = document.getElementById('login-screen');
+      if (ls) ls.style.display = 'none';
       document.getElementById('sidebar').style.display = 'flex';
       document.getElementById('main').style.display = 'flex';
-      
       _updateSyncStatus(true);
       showPage('dashboard');
-      toast('Bienvenue, ' + googleEmail);
     } else {
-      // Si l'email nettoyé n'est pas trouvé
-      console.error("Accès refusé :", firebaseKey, "introuvable.");
       _fbAuth.signOut();
       _fbShowInfo('\u26d4 Acc\u00e8s refus\u00e9 : ' + googleEmail + ' n\'est pas autoris\u00e9.', 'err');
     }
   }).catch(function(err) {
-    console.error("Erreur Firebase Config:", err);
-    _fbShowInfo('Erreur de connexion à la base de données.', 'err');
+    console.error("Erreur Config:", err);
+  });
+}
+
+function _fbOnSignedOut() {
+  ROLE = null;
+  _fbReady = false;
+  var ls = document.getElementById('login-screen');
+  if (ls) ls.style.display = 'flex';
+  document.getElementById('sidebar').style.display = 'none';
+  document.getElementById('main').style.display = 'none';
+  _updateSyncStatus(false);
+}
+
+function _fbSignIn() {
+  if (!_fbReady) { _fbInit(); }
+  var btn = document.getElementById('btn-google');
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.7'; }
+
+  var provider = new firebase.auth.GoogleAuthProvider();
+  provider.addScope('email');
+  provider.addScope('profile');
+  provider.setCustomParameters({ prompt: 'select_account' });
+
+  _fbAuth.signInWithPopup(provider).then(function(result) {
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+  }).catch(function(err) {
+    console.warn('Popup bloqué, bascule sur redirect', err);
+    _fbAuth.signInWithRedirect(provider);
   });
 }
 
