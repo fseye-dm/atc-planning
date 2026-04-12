@@ -303,10 +303,9 @@ textarea{resize:vertical;min-height:60px}
 #topbar .week-info{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:var(--b6);background:var(--b1);border:1px solid #bfdbfe;padding:4px 11px;border-radius:16px;white-space:nowrap}
 
 </style>
-<!-- Firebase SDK v10.x — CDN officiel Google (stable, certifié, non filtré) -->
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+<!-- Firebase SDK : chargement dynamique séquentiel via _loadFirebaseSDK() -->
+<!-- Les scripts sont injectés par JavaScript avec onload/onerror garanti -->
+<!-- Cela évite la race condition entre les scripts statiques et _fbInit() -->
 </head>
 
 <!-- LOGIN -->
@@ -738,7 +737,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v11.0';
+var APP_VERSION = 'v11.3';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -941,7 +940,8 @@ var SYNC = {
 // Quand l'app est servie via http:// ou https://, on peut utiliser
 // fetch() pour lire le fichier JSON directement depuis le serveur web.
 // Cela supprime le besoin de sélectionner un fichier pour la LECTURE.
-var _HTTP_CONTEXT = (location.protocol === 'http:' || location.protocol === 'https:');
+// _HTTP_CONTEXT DÉSACTIVÉ — Firebase est la source unique de données
+var _HTTP_CONTEXT = false;
 
 // URL de base de l'application (dossier courant)
 function _getBaseUrl() {
@@ -952,7 +952,8 @@ function _getBaseUrl() {
 
 // URL du fichier sync JSON — toujours dans le même dossier que index.html
 function _getSyncJsonUrl() {
-  return _getBaseUrl() + 'atc_sync_data.json';
+  // DÉSACTIVÉ — Firebase est la source unique, plus de fichier JSON local
+  return '';
 }
 
 // Nom natif du fichier application (index.html sur le serveur)
@@ -1535,6 +1536,76 @@ function _showMergeNotif(by, log) {
 
 // ── Clé localStorage pour signaler un redirect en cours
 var _FB_REDIRECT_KEY = 'dm_fb_redirect_pending';
+var _fbInitRetries = 0;
+
+// ════════════════════════════════════════════════════════════════
+// CHARGEUR FIREBASE DYNAMIQUE SÉQUENTIEL
+// ════════════════════════════════════════════════════════════════
+// Charge les 3 scripts Firebase dans l'ordre, via onload garanti.
+// Contrairement aux balises script statiques dans le head,
+// cette méthode garantit que chaque script est EXÉCUTÉ avant
+// que le suivant soit demandé, et qu'_fbInit() n'est appelé
+// QU'APRÈS que les 3 scripts sont pleinement disponibles.
+// Pas de retry aveugle — chaque script signale son propre succès.
+function _loadFirebaseSDK(onReady) {
+  var FIREBASE_VER  = '10.14.1';
+  // jsDelivr en primaire : CDN neutre, non filtré par Edge Tracking Prevention
+  // gstatic.com est bloqué par Edge car identifié comme tracker Google
+  var JSDELIVR_BASE = 'https://cdn.jsdelivr.net/npm/firebase@' + FIREBASE_VER + '/';
+  // unpkg en second fallback (mirror npm)
+  var UNPKG_BASE    = 'https://unpkg.com/firebase@' + FIREBASE_VER + '/';
+  // gstatic en dernier recours
+  var GSTATIC_BASE  = 'https://www.gstatic.com/firebasejs/' + FIREBASE_VER + '/';
+
+  var SCRIPTS = [
+    'firebase-app-compat.js',
+    'firebase-auth-compat.js',
+    'firebase-database-compat.js'
+  ];
+
+  // Essaie chaque CDN dans l'ordre, passe au suivant sur onerror
+  var CDN_LIST = [JSDELIVR_BASE, UNPKG_BASE, GSTATIC_BASE];
+
+  function _tryLoad(scriptName, cdnIndex, onSuccess, onFail) {
+    if (cdnIndex >= CDN_LIST.length) {
+      onFail(scriptName);
+      return;
+    }
+    var s = document.createElement('script');
+    s.type  = 'text/javascript';
+    s.async = false;
+    s.src   = CDN_LIST[cdnIndex] + scriptName;
+    s.onload = function() { onSuccess(); };
+    s.onerror = function() {
+      // Ce CDN échoue, essayer le suivant silencieusement
+      _tryLoad(scriptName, cdnIndex + 1, onSuccess, onFail);
+    };
+    document.head.appendChild(s);
+  }
+
+  function _loadOne(i) {
+    if (i >= SCRIPTS.length) {
+      console.log('Firebase SDK ' + FIREBASE_VER + ' : 3/3 scripts chargés.');
+      if (typeof onReady === 'function') onReady();
+      return;
+    }
+    _tryLoad(SCRIPTS[i], 0,
+      function() { _loadOne(i + 1); }, // succès → script suivant
+      function(name) {                 // tous les CDN ont échoué
+        console.error('Firebase: impossible de charger ' + name);
+        _fbShowInfo(
+          '\u26d4 Impossible de charger Firebase (' + name + ').<br>' +
+          'V\u00e9rifiez votre connexion internet et rechargez la page (F5).',
+          'err'
+        );
+      }
+    );
+  }
+
+  _loadOne(0);
+}
+
+
 
 function _fbShowInfo(msg, type) {
   // type: 'ok' | 'warn' | 'err' | 'info'
@@ -1571,85 +1642,96 @@ function _fbInit() {
     if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
   }
 
-  // ── Vérifier que la lib Firebase est chargée — avec retry si scripts encore en cours
+  // ── Firebase SDK garanti chargé — appelé depuis _loadFirebaseSDK(callback)
+  // Plus besoin de retry : onload a confirmé que les scripts sont prêts
   if (typeof firebase === 'undefined' || !firebase.initializeApp) {
-    // Firebase pas encore chargé : retenter dans 300ms (max 10 tentatives = 3s)
-    _fbInitRetries = (_fbInitRetries || 0) + 1;
-    if (_fbInitRetries <= 10) {
-      console.log('Firebase SDK pas encore prêt, retry ' + _fbInitRetries + '/10...');
-      setTimeout(_fbInit, 300);
-    } else {
-      console.error('Firebase SDK non chargé après 3s. Vérifiez votre connexion.');
-      _fbShowInfo(
-        '\u26d4 Le SDK Firebase ne se charge pas.<br>' +
-        'V\u00e9rifiez votre connexion internet et rechargez la page (F5).',
-        'err'
-      );
-    }
+    // Ne devrait jamais arriver — garde-fou pour les tests directs
+    _fbShowInfo(
+      '\u26d4 Firebase SDK non disponible.<br>' +
+      'Rechargez la page (F5). Si le probl\u00e8me persiste, v\u00e9rifiez votre connexion.',
+      'err'
+    );
     return;
   }
-  _fbInitRetries = 0; // Reset compteur si succès
 
   try {
     _fbApp  = firebase.initializeApp(FIREBASE_CONFIG);
     _fbAuth = firebase.auth();
     _fbDB   = firebase.database();
 
-    // ── PERSISTANCE LOCAL : évite la perte de session lors du redirect
-    // Utilise localStorage (pas IndexedDB) — non bloqué par Edge Tracking Prevention
-    _fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).then(function() {
-      _fbReady = true;
+    // ── PERSISTANCE EN CASCADE : LOCAL → SESSION → NONE ──────────────
+    // Edge Tracking Prevention peut bloquer localStorage (auth/operation-not-supported).
+    // On tente chaque niveau de persistance et on proceed dans tous les cas.
+    _fbReady = true; // marquer prêt AVANT le setPersistence (non bloquant)
 
-      // ── Récupérer le résultat du redirect Google
-      return _fbAuth.getRedirectResult();
+    function _proceedAfterPersistence() {
+      // ── Récupérer le résultat d'un éventuel redirect Google ──
+      _fbAuth.getRedirectResult().then(function(result) {
+        try { localStorage.removeItem(_FB_REDIRECT_KEY); } catch(e) {}
+        var btn = document.getElementById('btn-google');
+        if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+        if (result && result.user) {
+          console.log('Firebase: redirect auth OK ->', result.user.email);
+          // onAuthStateChanged se déclenche automatiquement
+        } else if (redirectPending) {
+          _fbShowInfo(
+            '\u26a0\ufe0f Redirection Google non aboutie.<br>' +
+            '<strong>Solution :</strong> Edge → ··· → Param\u00e8tres → Confidentialit\u00e9 ' +
+            '→ Protection du suivi → choisir <strong>"De base"</strong> → Relancer la page.',
+            'warn'
+          );
+        }
+      }).catch(function(err) {
+        try { localStorage.removeItem(_FB_REDIRECT_KEY); } catch(e) {}
+        var btn = document.getElementById('btn-google');
+        if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+        console.warn('Firebase getRedirectResult:', err.code, err.message);
+        // On ne bloque pas — onAuthStateChanged gère la session
+      });
+    }
 
-    }).then(function(result) {
-      // Nettoyer le flag redirect dans tous les cas
-      localStorage.removeItem(_FB_REDIRECT_KEY);
-
-      var btn = document.getElementById('btn-google');
-      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-
-      if (result && result.user) {
-        // Connexion redirect réussie
-        console.log('Firebase: redirect auth OK ->', result.user.email);
-        // onAuthStateChanged va se déclencher juste après
-      } else if (redirectPending) {
-        // On était censé avoir un résultat mais il est null
-        // Cela arrive quand Edge bloque le cookie de redirection
-        _fbShowInfo(
-          '\u26a0\ufe0f La redirection Google n\'a pas abouti (protection Edge).<br>' +
-          'Essayez : <strong>1)</strong> Ouvrir Edge → ··· → Paramètres → Confidentialité → Protection du suivi → Mettre sur "De base" temporairement<br>' +
-          'Ou : <strong>2)</strong> Cliquez à nouveau sur "Se connecter avec Google" dans ce navigateur.',
-          'warn'
-        );
-      }
-
-    }).catch(function(err) {
-      localStorage.removeItem(_FB_REDIRECT_KEY);
-      var btn = document.getElementById('btn-google');
-      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-
-      console.error('Firebase auth error:', err.code, err.message);
-
-      if (err.code === 'auth/unauthorized-domain') {
-        _fbShowInfo(
-          '⛔ Domaine non autorisé : <strong>' + location.hostname + '</strong><br>' +
-          'Allez sur console.firebase.google.com → Authentication → Settings → Domaines autorisés → Ajouter : <strong>' + location.hostname + '</strong>',
-          'err'
-        );
-      } else if (err.code === 'auth/network-request-failed') {
-        _fbShowInfo('❌ Erreur réseau — vérifiez votre connexion internet.', 'err');
-      } else if (err.code === 'auth/web-storage-unsupported' || err.code === 'auth/operation-not-supported-in-this-environment') {
-        _fbShowInfo(
-          '⛔ Stockage web bloqué par Edge.<br>' +
-          'Allez dans Paramètres Edge → Confidentialité → Protection du suivi → mettre sur "De base".',
-          'err'
-        );
-      } else if (err.code && err.code !== 'auth/no-auth-event') {
-        _fbShowInfo('❌ Erreur Firebase (' + err.code + ') : ' + err.message, 'err');
-      }
-    });
+    // Niveau 1 : LOCAL (localStorage — optimal)
+    _fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+      .then(function() {
+        console.log('Firebase: persistance LOCAL activée.');
+        _proceedAfterPersistence();
+      })
+      .catch(function(e1) {
+        // LOCAL bloqué (Edge strict) → essayer SESSION
+        console.warn('Firebase LOCAL persistence bloqué, essai SESSION...');
+        _fbAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION)
+          .then(function() {
+            console.log('Firebase: persistance SESSION activée (F5 = reconnexion requise).');
+            _proceedAfterPersistence();
+          })
+          .catch(function(e2) {
+            // SESSION bloqué → utiliser NONE (mémoire — fonctionne toujours)
+            console.warn('Firebase SESSION bloqué, utilisation NONE (mémoire)...');
+            _fbAuth.setPersistence(firebase.auth.Auth.Persistence.NONE)
+              .then(function() {
+                console.log('Firebase: persistance NONE (session en mémoire).');
+                _fbShowInfo(
+                  '\u26a0\ufe0f Session en m\u00e9moire uniquement (stockage bloqu\u00e9 par Edge).<br>' +
+                  'La connexion sera maintenue pendant cette session mais ne survivra pas \u00e0 un F5.<br>' +
+                  '<strong>Solution durable :</strong> Edge → Param\u00e8tres → Confidentialit\u00e9 → Protection du suivi → "De base".',
+                  'warn'
+                );
+                _proceedAfterPersistence();
+              })
+              .catch(function(e3) {
+                // Aucune persistance possible — Firebase Auth ne peut pas fonctionner
+                console.error('Firebase: aucune persistance disponible.', e3);
+                _fbShowInfo(
+                  '\u26d4 Firebase Auth ne peut pas fonctionner dans cet environnement.<br>' +
+                  'Le stockage web est bloqu\u00e9 par les param\u00e8tres de s\u00e9curit\u00e9 du navigateur.<br>' +
+                  '<strong>Solutions :</strong><br>' +
+                  '1) Edge → Param\u00e8tres → Confidentialit\u00e9 → Protection du suivi → "De base"<br>' +
+                  '2) Utiliser Google Chrome (recommand\u00e9 pour cette application)',
+                  'err'
+                );
+              });
+          });
+      });
 
     // ── Écouter les changements d'état d'authentification
     _fbAuth.onAuthStateChanged(function(user) {
@@ -2051,13 +2133,13 @@ function _fbSetCloudBadge(status, label) {
 // ── Override de _syncWrite pour intégrer Firebase ─────────────
 // Write APP to shared file
 function _syncWrite() {
-  // Firebase First : écriture immédiate si connecté, indépendante de SYNC.active
+  // ── Firebase First (Source unique de vérité) ─────────────
   if (_fbReady && _fbDB) {
     _fbWriteToCloud();
-    return; // Firebase gère tout, pas besoin du reste
+    return;
   }
-
-  // FSAPI (écriture directe fichier réseau — mode local)
+  // ── Fallback FSAPI pour réseau local DM uniquement ───────
+  // (pas de HTTP PUT vers atc_sync_data.json — définitivement supprimé)
   if (SYNC.handle && SYNC.active) {
     if (SYNC.writing) return;
     SYNC.writing = true;
@@ -2071,52 +2153,18 @@ function _syncWrite() {
       _syncSetStatus('ok');
     }).catch(function(err) {
       SYNC.writing = false;
-      if (err.name === 'NotAllowedError') {
-        _syncSetStatus('permission');
-        // FSAPI permission perdue — essayer HTTP PUT en fallback
-        if (_HTTP_CONTEXT) _syncWriteHttp(payload);
-      } else {
-        _syncSetStatus('error');
-        if (_HTTP_CONTEXT) _syncWriteHttp(payload); // fallback
-      }
+      _syncSetStatus('error');
       console.warn('Sync FSAPI write error:', err);
     });
-    return;
   }
-
-  // Mode HTTP sans handle FSAPI → essayer HTTP PUT
-  if (_HTTP_CONTEXT && SYNC.active) {
-    var payload = _syncPayload();
-    SYNC.lastHash = _hashStr(payload);
-    SYNC.lastWriteTs = Date.now();
-    _syncWriteHttp(payload);
-    return;
+  // Hors ligne : sauvegarde locale uniquement
+  else {
+    _saveLocalOnly();
   }
 }
 
-// Écriture via HTTP PUT (si le serveur web supporte PUT)
-// IIS/Apache avec WebDAV activé, ou serveur custom acceptant PUT
-function _syncWriteHttp(payload) {
-  var url = _getSyncJsonUrl();
-  fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: payload
-  }).then(function(r) {
-    if (r.ok) {
-      _syncSetStatus('ok', '✅ Sync HTTP PUT réussi');
-    } else if (r.status === 405) {
-      // Méthode non autorisée → serveur en lecture seule
-      // Les données Chef restent locales — signaler à l'utilisateur
-      _syncSetStatus('error', '⚠️ Serveur HTTP en lecture seule — utilisez le mode FSAPI pour l\'écriture');
-      _showHttpWriteWarning();
-    } else {
-      _syncSetStatus('error', '❌ Erreur HTTP PUT : ' + r.status);
-    }
-  }).catch(function() {
-    _syncSetStatus('error', '❌ Erreur réseau — données locales préservées');
-  });
-}
+// _syncWriteHttp DÉSACTIVÉE — Firebase First (pas de PUT vers atc_sync_data.json)
+function _syncWriteHttp(payload) { /* DÉSACTIVÉE — Firebase est la source unique */ }
 
 // Alerte unique (une fois par session) si Chef ne peut pas écrire via HTTP
 var _httpWriteWarningShown = false;
@@ -2141,55 +2189,14 @@ function _showHttpWriteWarning() {
 // Read shared file and merge
 // ── LECTURE SYNC — Mode HTTP fetch ou FSAPI ───────────────────
 function _syncRead() {
-  // MODE HTTP : utiliser fetch() si contexte HTTP et mode HTTP activé
-  if (SYNC.httpMode || (_HTTP_CONTEXT && !SYNC.handle && SYNC.active)) {
-    _syncReadHttp();
-    return;
-  }
-  // MODE FSAPI (fichier local / réseau via FSAPI)
-  _syncReadFSAPI();
+  // Firebase First — si connecté, ne pas utiliser le polling local
+  if (_fbReady && _fbDB) return; // Firebase realtime listener gère tout
+  // Mode FSAPI uniquement (profil DM réseau local, pas de polling HTTP)
+  if (SYNC.handle && SYNC.active) _syncReadFSAPI();
 }
 
-// Lecture via HTTP fetch (serveur web) — aucune permission requise
-function _syncReadHttp() {
-  var url = _getSyncJsonUrl() + '?_t=' + Date.now();
-  fetch(url, { cache: 'no-store' })
-    .then(function(r) {
-      if (r.status === 404) {
-        _syncSetStatus('inactive', '\u26A0 Fichier sync introuvable — le DM doit le créer');
-        return null;
-      }
-      if (!r.ok) return Promise.reject('HTTP ' + r.status);
-      return r.text();
-    })
-    .then(function(txt) {
-      if (!txt || !txt.trim()) return;
-      var hash = _hashStr(txt);
-      if (hash === SYNC.lastHash) { _syncSetStatus('ok'); return; }
-      SYNC.lastHash = hash;
-      var remote;
-      try { remote = JSON.parse(txt); } catch(e) { _syncSetStatus('error', '\u274C JSON invalide'); return; }
-      if (remote._ts === SYNC.lastWriteTs && remote._by === ROLE) return;
-      var changed = _syncMerge(remote);
-      if (changed) {
-        var j = JSON.stringify(APP);
-        try { localStorage.setItem(SK, j); } catch(e) {}
-        try { sessionStorage.setItem(SK, j); } catch(e) {}
-        _idbSave(SK, j);
-        autoRefreshUI();
-        toast('\uD83D\uDD04 Synchronisation reçue (' +
-          (remote._by === 'dm' ? 'Dir. Matériel' : 'Chef d\'Atelier') + ')');
-      }
-      _syncSetStatus('ok', '\u2705 SYNCHRONISÉ — ' +
-        new Date().toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit',second:'2-digit'}));
-      SYNC.readCount++;
-    })
-    .catch(function(err) {
-      // Fallback FSAPI si handle disponible
-      if (SYNC.handle && SYNC.active) { _syncReadFSAPI(); return; }
-      _syncSetStatus('error', '\u274C Réseau : ' + (err.message || err));
-    });
-}
+// _syncReadHttp DÉSACTIVÉE — Firebase First
+function _syncReadHttp() { /* DÉSACTIVÉE — Firebase realtime listener gère la lecture */ }
 
 // Lecture via File System Access API
 function _syncReadFSAPI() {
@@ -2314,13 +2321,11 @@ function _syncSetStatus(status, detail) {
   badge.innerHTML = '<span class="sb-dot" style="background:' + c.dot + ';width:7px;height:7px;border-radius:50%;display:inline-block;"></span>' + (labels[status] || status);
 }
 
-// Start polling every 5 seconds
+// Polling DÉSACTIVÉ — Firebase realtime listener remplace le setInterval
 function _syncStartPolling() {
-  if (SYNC.polling) clearInterval(SYNC.polling);
-  SYNC.polling = setInterval(_syncRead, 5000);
-  _syncRead(); // immediate first read
+  // No-op: Firebase gère la synchronisation en temps réel
+  if (SYNC.polling) { clearInterval(SYNC.polling); SYNC.polling = null; }
 }
-
 function _syncStopPolling() {
   if (SYNC.polling) { clearInterval(SYNC.polling); SYNC.polling = null; }
 }
@@ -2794,9 +2799,16 @@ function openBaseLocale() {
 }
 
 function openSyncModal() {
-  _syncUpdateModalUI();
-  openM('m-sync');
+  // Si Firebase est actif → afficher le statut Cloud au lieu des options fichier local
+  if (_fbReady && _fbDB) {
+    var user = (_fbAuth && _fbAuth.currentUser) ? _fbAuth.currentUser.email : 'Inconnu';
+    toast('\u2601 Firebase actif — connect\u00e9 en tant que ' + user + '. Synchronisation temps r\u00e9el via Firebase Realtime Database.');
+    return;
+  }
+  // Mode local uniquement (DM sans connexion Firebase)
+  showPage('admin');
 }
+
 
 function _syncUpdateModalUI() {
   var sColors = { ok:'#10b981', syncing:'#3b82f6', error:'#ef4444', permission:'#eab308', inactive:'#94a3b8', conflict:'#f97316' };
@@ -3185,111 +3197,30 @@ function _applyLogin(role, saveSession) {
   // Nettoyer les équipements supprimés depuis plus de 7 jours
   setTimeout(_purgeSoftDeleted, 2000);
 
-  // ── SYNC : DÉMARRAGE SELON LE CONTEXTE ─────────────────────
+  // ── SYNC : Firebase est la source unique de données ────────
+  // Le polling HTTP vers atc_sync_data.json est définitivement désactivé.
+  // La synchronisation est gérée par le listener Firebase Realtime Database
+  // déclenché dans _fbStartSync() après l'authentification Google.
   //
-  // Mode HTTP (url http://...) :
-  //   LECTURE  → fetch() automatique, aucune action requise
-  //   ÉCRITURE → FSAPI handle restauré en parallèle
+  // Mode FSAPI local : disponible uniquement pour le profil DM si un handle
+  // a été configuré manuellement. Non utilisé en mode Cloud.
   //
-  // Mode fichier (file:// ou réseau direct) :
-  //   LECTURE + ÉCRITURE → FSAPI handle requis
-  //
-  if (_HTTP_CONTEXT) {
-    // ── Démarrer le polling HTTP pour la LECTURE ────────────
-    fetch(_getSyncJsonUrl() + '?_t=' + Date.now(), {cache:'no-store', method:'HEAD'})
-      .then(function(r) {
-        SYNC.httpMode = true;
-        SYNC.active   = true;
-        if (r.ok || r.status === 200) {
-          _syncSetStatus('syncing', '\uD83C\uDF10 Mode HTTP — lecture auto toutes les 5s');
-          _syncStartPolling();
-          // Lecture immédiate pour charger les dernières données
-          setTimeout(_syncRead, 800);
-          if (role !== 'dm') {
-            toast('\uD83C\uDF10 Sync HTTP activée — données DM chargées automatiquement.');
-          }
-        } else {
-          _syncStartPolling();
-          _syncSetStatus('inactive', '\u26A0 Fichier sync non trouvé — le DM doit le créer');
-        }
-      })
-      .catch(function() {
-        // Serveur non accessible → mode hors ligne
-        _syncSetStatus('inactive', '\uD83D\uDD08 Hors ligne — modifications sauvegardées localement');
-      });
 
-    // ── Restaurer aussi le handle FSAPI pour l'ÉCRITURE ─────
-    // (en parallèle du fetch HTTP — non bloquant)
-    // Le geste utilisateur (login) est actif ici → requestPermission possible
-    _idbGet(SK_SYNC_HANDLE, function(handle) {
-      if (!handle) return;
-      handle.queryPermission({ mode: 'readwrite' }).then(function(perm) {
-        if (perm === 'granted') {
-          SYNC.handle = handle;
-          // Ne pas écraser httpMode — les deux coexistent
-        } else if (perm === 'prompt') {
-          // Tenter la ré-autorisation dans le contexte du geste login
-          handle.requestPermission({ mode: 'readwrite' }).then(function(p2) {
-            if (p2 === 'granted') {
-              SYNC.handle = handle;
-              // handle disponible → _syncWrite() peut s'en servir
-            }
-            // Si refusé → écriture via handle non disponible,
-            // mais la lecture HTTP continue de fonctionner
-          }).catch(function(){});
-        }
-      }).catch(function(){});
-    });
-    // PAS de return ici — continuer pour permettre _dbRestoreHandle aussi
-  } else {
-    // ── Mode FSAPI pur (file:// ou réseau direct sans HTTP) ──
-    _idbGet(SK_SYNC_HANDLE, function(handle) {
-      if (!handle) return;
-      handle.queryPermission({ mode: 'readwrite' }).then(function(perm) {
-        if (perm === 'granted') {
-          SYNC.handle = handle;
-          SYNC.active = true;
-          _syncSetStatus('syncing');
-          _syncStartPolling();
-          _idbGet(SK_SYNC_META, function(meta) {
-            if (meta && meta.file) {
-              var el = document.getElementById('sync-file-name');
-              if (el) el.textContent = '\uD83D\uDCC4 ' + meta.file;
-            }
-          });
-          toast('\uD83D\uDD04 Synchronisation rétablie automatiquement.');
-        } else if (perm === 'prompt') {
-          handle.requestPermission({ mode: 'readwrite' }).then(function(p2) {
-            if (p2 === 'granted') {
-              SYNC.handle = handle;
-              SYNC.active = true;
-              _syncSetStatus('syncing');
-              _syncStartPolling();
-              var banner = document.getElementById('sync-reconnect-banner');
-              if (banner) banner.remove();
-              _idbGet(SK_SYNC_META, function(meta) {
-                toast('\u2705 Synchronisation reconnectée : ' + ((meta && meta.file) ? meta.file : 'fichier sync'));
-              });
-            } else {
-              SYNC.handle = handle;
-              _syncSetStatus('permission');
-              _idbGet(SK_SYNC_META, function(meta) {
-                _syncShowReconnectBanner((meta && meta.file) ? meta.file : 'atc_sync_data.json');
-              });
-            }
-          }).catch(function() {
+    // FSAPI handle restauré si disponible (DM réseau local uniquement)
+    if (!_fbReady || !_fbDB) {
+      _idbGet(SK_SYNC_HANDLE, function(handle) {
+        if (!handle) return;
+        handle.queryPermission({ mode: 'readwrite' }).then(function(perm) {
+          if (perm === 'granted') {
             SYNC.handle = handle;
-            _syncSetStatus('permission');
-            _idbGet(SK_SYNC_META, function(meta) {
-              _syncShowReconnectBanner((meta && meta.file) ? meta.file : 'atc_sync_data.json');
-            });
-          });
-        } else {
-          _syncSetStatus('inactive');
-        }
-      }).catch(function() { _syncSetStatus('inactive'); });
-    });
-  }
+            SYNC.active = true;
+            _syncSetStatus('syncing');
+            _syncStartPolling();
+          }
+        }).catch(function(){});
+      });
+    }
+
 } // fin _applyLogin
 
 function doLogin() {
@@ -6380,12 +6311,17 @@ window.addEventListener('offline', function() {
 
 // On startup: restore sync handle + session + DB handle (F5 persistence)
 window.addEventListener('load', function() {
-  _injectSignatures();          // Show version on login screen immediately
-  setTimeout(_syncRestoreHandle, 600);
+  _injectSignatures();          // Afficher version sur écran login
   setTimeout(_sessionRestore, 100);
   setTimeout(_dbRestoreHandle, 400);
-  // Initialiser Firebase immédiatement (config intégrée directement)
-  _fbInit();
+
+  // ── Charger Firebase SDK dynamiquement puis initialiser ──────
+  // _loadFirebaseSDK garantit que les 3 scripts sont prêts via onload
+  // avant d'appeler _fbInit() — aucune race condition possible
+  _loadFirebaseSDK(function() {
+    // Les 3 scripts sont confirmés chargés ici
+    _fbInit();
+  });
 });
 
 // Init sync badge
