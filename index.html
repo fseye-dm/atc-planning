@@ -760,7 +760,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v11.4';
+var APP_VERSION = 'v11.5';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1142,8 +1142,12 @@ function _syncMerge(remote) {
     }
 
     if (!localWasModified && !remoteWasModified) {
-      // Ni l'un ni l'autre n'a de timestamp → utiliser la règle de priorité simple
-      if (remoteProfile === winner) {
+      // Aucun timestamp connu → appliquer si le distant diffère du local
+      // (coexistence simple — pas de conflit si les deux n'ont pas modifié)
+      if (remoteProfile !== ROLE) {
+        // L'autre profil a quelque chose de différent → l'appliquer
+        obj[field] = remoteVal; changed = true;
+      } else if (remoteProfile === winner) {
         obj[field] = remoteVal; changed = true;
       }
       return;
@@ -2067,32 +2071,54 @@ function _fbStartSync(role) {
   _fbDB.ref('atcdata').once('value').then(function(snap) {
     var remote = snap.val();
     if (remote && typeof remote === 'object') {
+      var remBy = remote._by || 'inconnu';
+      var remTs = new Date(remote._ts || 0).toLocaleTimeString('fr-FR');
+      console.log('Firebase: données chargées depuis ' + remBy + ' (' + remTs + ')');
       try {
-        var changed = _syncMerge(remote);
-        if (changed) { _saveLocalOnly(); autoRefreshUI(); }
-      } catch(e) { console.error('Firebase merge:', e); }
+        // Fusionner et TOUJOURS rafraîchir l'UI au démarrage
+        _syncMerge(remote);
+        _saveLocalOnly();
+        autoRefreshUI();
+      } catch(e) { console.error('Firebase merge démarrage:', e); }
     } else {
+      // Aucune donnée dans Firebase → écrire les données locales
+      console.log('Firebase: base vide — initialisation avec données locales');
       _fbWriteToCloud();
     }
-    _fbSetCloudBadge('ok', '☁ Cloud');
+    _fbSetCloudBadge('ok', '☁ Cloud actif');
   }).catch(function(err) {
     _fbSetCloudBadge('error', '☁ Erreur');
-    console.error('Firebase read:', err);
+    console.error('Firebase lecture démarrage:', err);
   });
 
   // ── Écoute temps réel — Single Source of Truth ───
+  // Utilise le timestamp _ts de l'écrivain (pas la taille JSON)
+  // pour distinguer les propres écritures des mises à jour distantes
   _fbListener = _fbDB.ref('atcdata').on('value', function(snap) {
     var remote = snap.val();
     if (!remote) return;
-    var remHash = JSON.stringify(remote).length;
-    if (remHash === SYNC._fbLastWriteSize) return;
+
+    // Ignorer uniquement SI c'est exactement notre propre dernière écriture
+    // (même timestamp ET même profil)
+    var remTs = remote._ts || 0;
+    var remBy = remote._by || '';
+    if (remTs > 0 && remTs === SYNC._fbLastWriteTs && remBy === ROLE) {
+      // C'est notre propre écriture qui rebondit — ignorer
+      return;
+    }
+
+    // C'est une mise à jour d'un autre profil OU une première connexion
     try {
       var changed = _syncMerge(remote);
       if (changed) {
         _saveLocalOnly();
-        // Recalcul KPI/Dashboard en temps réel
         autoRefreshUI();
         _fbRefreshKPIs();
+        console.log('Firebase sync: données reçues de', remBy, '— UI mise à jour');
+      } else {
+        // Même si _syncMerge dit "rien changé", forcer le refresh
+        // car les timestamps locaux peuvent masquer des vrais changements
+        autoRefreshUI();
       }
     } catch(e) { console.error('Firebase realtime merge:', e); }
     _fbSetCloudBadge('ok', '☁ Synchronisé');
@@ -2147,7 +2173,7 @@ function _fbStopListener() {
 }
 
 // Écriture Firebase — indépendante de SYNC.active (Firebase First)
-SYNC._fbLastWriteSize = 0;
+SYNC._fbLastWriteTs = 0; // timestamp de la dernière écriture Firebase locale
 var _fbWriteDebounce = null;
 
 function _fbWriteToCloud() {
@@ -2172,7 +2198,7 @@ function _fbWriteToCloud() {
         return value;
       }));
 
-      SYNC._fbLastWriteSize = JSON.stringify(payload).length;
+      SYNC._fbLastWriteTs = payload._ts || 0; // timestamp réel de l'écriture
 
       // Écriture dans Firebase Realtime Database
       _fbDB.ref('atcdata').set(payload).then(function() {
