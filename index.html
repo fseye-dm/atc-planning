@@ -760,7 +760,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v11.5';
+var APP_VERSION = 'v11.6';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -2021,11 +2021,17 @@ function _fbOnSignedIn(user) {
     info.innerHTML = '\u2705 Connect\u00e9 : <strong>' + (user.displayName || email) + '</strong>' +
       '&nbsp;&nbsp;<span style="font-size:10px;opacity:.8;">' + (role === 'dm' ? '\ud83d\udc54 Dir. Mat\u00e9riel' : '\ud83d\udd27 Chef d\'Atelier') + '</span>';
   }
-  // Pré-sélectionner le profil correspondant à l'email
+  // ── Connexion Google réussie → entrer dans l'application directement ──
+  // Plus besoin de mot de passe : Google Auth fait office d'authentification
   selRole(role);
-  // Démarrer la synchronisation Firebase
+
+  // Entrer dans l'application sans passer par le formulaire de mot de passe
+  _applyLogin(role, true);
+
+  // Démarrer la synchronisation Firebase (après _applyLogin qui masque le login screen)
   _fbStartSync(role);
-  toast('\u2601 Connect\u00e9 : ' + (user.displayName || email));
+
+  toast('\u2601 Connect\u00e9 avec Google : ' + (user.displayName || email));
 }
 
 // Callback : utilisateur déconnecté
