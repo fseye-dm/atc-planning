@@ -307,6 +307,28 @@ textarea{resize:vertical;min-height:60px}
 <!-- Firebase SDK : chargement dynamique séquentiel via _loadFirebaseSDK() -->
 <!-- Les scripts sont injectés par JavaScript avec onload/onerror garanti -->
 <!-- Cela évite la race condition entre les scripts statiques et _fbInit() -->
+<!-- Détection file:// instantanée — avant Firebase -->
+<script>
+(function(){
+  if(location.protocol==='file:'){
+    document.addEventListener('DOMContentLoaded',function(){
+      var el=document.getElementById('google-user-info');
+      if(el){
+        el.style.display='block';
+        el.style.background='#fef3c7';
+        el.style.border='1px solid #f59e0b';
+        el.style.color='#92400e';
+        el.innerHTML='<strong>⚠️ Ouvert en local (file://)</strong><br>'
+          +'Google Auth n\'est pas disponible hors ligne.<br>'
+          +'Utilisez la connexion par <strong>mot de passe</strong> ci-dessous.<br>'
+          +'<span style="font-size:10px;opacity:.8;">Chef : CHEF2026 &nbsp;|  DM : DM2026</span>';
+      }
+      var btn=document.getElementById('btn-google');
+      if(btn){btn.disabled=true;btn.style.opacity='0.35';btn.style.cursor='not-allowed';}
+    });
+  }
+})();
+</script>
 </head>
 
 <!-- LOGIN -->
@@ -738,7 +760,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v11.3';
+var APP_VERSION = 'v11.4';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1629,6 +1651,34 @@ function _fbShowInfo(msg, type) {
 function _fbInit() {
   if (_fbApp) return;
 
+  // ── DÉTECTION file:// : Firebase Auth ne fonctionne pas en local ──────────
+  // Le fichier doit être déployé sur GitHub Pages (https://) pour fonctionner.
+  // En file:// : signInWithPopup et setPersistence échouent avec
+  // auth/operation-not-supported-in-this-environment.
+  if (location.protocol === 'file:') {
+    console.warn('DM-PLANNING: protocole file:// détecté — Firebase Auth désactivé.');
+    _fbShowInfo(
+      '<strong>\uD83D\uDCBB Application ouverte directement depuis le disque (file://)</strong><br>' +
+      'L\'authentification Google <strong>nécessite un serveur web</strong> (http:// ou https://).<br>' +
+      '<br>' +
+      '<strong>\u2705 Solutions :</strong><br>' +
+      '\u2022 Déployez le fichier sur <strong>GitHub Pages</strong> (gratuit, 5 min) et ouvrez l\'URL https://...<br>' +
+      '\u2022 Ou utilisez la <strong>connexion locale par mot de passe</strong> ci-dessous.<br>' +
+      '<br>' +
+      '<span style="font-size:10px;color:#6b7280;">Chef : CHEF2026 | DM : DM2026</span>',
+      'warn'
+    );
+    // Désactiver le bouton Google et montrer les alternatives locales
+    var btn = document.getElementById('btn-google');
+    if (btn) {
+      btn.disabled = true;
+      btn.style.opacity = '0.35';
+      btn.style.cursor = 'not-allowed';
+      btn.title = 'Déployez sur GitHub Pages pour utiliser Google Auth';
+    }
+    return; // Ne pas initialiser Firebase en file://
+  }
+
   // ── Vérifier que la config est remplie
   if (!FIREBASE_CONFIG.apiKey) {
     console.warn('DM-PLANNING: Firebase apiKey manquante.');
@@ -1721,6 +1771,18 @@ function _fbInit() {
               })
               .catch(function(e3) {
                 console.error('Firebase: aucune persistance disponible.', e3);
+                // Aucun niveau de persistance n'est disponible
+                // → l'environnement bloque totalement le stockage web
+                _fbShowInfo(
+                  '\u26D4 Stockage web totalement bloqué par le navigateur.<br>' +
+                  'Firebase Auth ne peut pas fonctionner dans ces conditions.<br>' +
+                  '<strong>Solutions :</strong><br>' +
+                  '\u2022 Edge → Paramètres → Confidentialité → Protection du suivi → <strong>"De base"</strong><br>' +
+                  '\u2022 Ou utilisez <strong>Google Chrome</strong> pour cette application.<br>' +
+                  '\u2022 Ou utilisez la connexion locale par mot de passe ci-dessous.<br>' +
+                  '<span style="font-size:10px;color:#6b7280;">Chef : CHEF2026 | DM : DM2026</span>',
+                  'err'
+                );
               });
           });
       });
@@ -1826,7 +1888,18 @@ function _fbSignIn() {
       );
     } else {
       if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-      _fbShowInfo('❌ Erreur connexion (' + popupErr.code + ') : ' + popupErr.message, 'err');
+      // Erreur générique ou auth/operation-not-supported-in-this-environment
+      if (popupErr.code === 'auth/operation-not-supported-in-this-environment') {
+        _fbShowInfo(
+          '\u26D4 Google Auth ne fonctionne pas dans cet environnement.<br>' +
+          'Assurez-vous d\'ouvrir l\'application via <strong>https://fseye-dm.github.io/atc-planning/</strong><br>' +
+          'et non depuis un fichier local (file://).<br>' +
+          '<span style="font-size:10px;color:#6b7280;">Connexion locale disponible ci-dessous — Chef : CHEF2026 | DM : DM2026</span>',
+          'err'
+        );
+      } else {
+        _fbShowInfo('\u274C Erreur connexion (' + popupErr.code + ') : ' + popupErr.message, 'err');
+      }
     }
   });
 }
@@ -2142,7 +2215,7 @@ function _syncWrite() {
     return;
   }
   // ── Fallback FSAPI pour réseau local DM uniquement ───────
-  // (pas de HTTP PUT vers atc_sync_data.json — définitivement supprimé)
+  // Firebase First — écriture directe vers Firebase Realtime Database
   if (SYNC.handle && SYNC.active) {
     if (SYNC.writing) return;
     SYNC.writing = true;
@@ -2166,7 +2239,7 @@ function _syncWrite() {
   }
 }
 
-// _syncWriteHttp DÉSACTIVÉE — Firebase First (pas de PUT vers atc_sync_data.json)
+// _syncWriteHttp DÉSACTIVÉE — Firebase Realtime Database est la source unique
 function _syncWriteHttp(payload) { /* DÉSACTIVÉE — Firebase est la source unique */ }
 
 // Alerte unique (une fois par session) si Chef ne peut pas écrire via HTTP
@@ -2182,7 +2255,7 @@ function _showHttpWriteWarning() {
   b.innerHTML = '<span style="font-size:16px;">⚠️</span>' +
     '<div><strong>Écriture réseau limitée</strong><br>' +
     '<span style="font-size:11px;">Vos saisies sont sauvegardées localement. Pour synchroniser avec le Dir. Matériel, ' +
-    'sélectionnez le fichier <code>atc_sync_data.json</code> via le bouton ci-dessous.</span></div>' +
+    'la synchronisation est gérée automatiquement via <strong>Firebase Cloud</strong>.</span></div>' +
     '<button onclick="syncConnectExistingFile()" style="margin-left:auto;padding:6px 14px;background:#f59e0b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:11px;white-space:nowrap;">📂 Connecter fichier sync</button>' +
     '<button onclick="this.parentElement.remove()" style="padding:5px 8px;background:transparent;border:1px solid #f59e0b;border-radius:5px;cursor:pointer;color:#92400e;font-size:11px;">✕</button>';
   var main = document.getElementById('main');
@@ -2364,7 +2437,7 @@ function _syncRestoreHandle() {
         SYNC.handle = handle;
         _syncSetStatus('permission');
         _idbGet(SK_SYNC_META, function(meta) {
-          var fname = (meta && meta.file) ? meta.file : 'atc_sync_data.json';
+          var fname = (meta && meta.file) ? meta.file : 'dm_planning_sync.json';
           var el = document.getElementById('sync-file-name');
           if (el) el.textContent = '\uD83D\uDD11 Permission requise — cliquez "Reconnecter" (' + fname + ')';
           // Show a reconnect banner in topbar
@@ -2392,7 +2465,7 @@ function _syncShowReconnectBanner(fname) {
     '<span style="font-size:18px;">\uD83D\uDD11</span>',
     '<div>',
       '<strong>Synchronisation réseau à autoriser</strong>',
-      '<br><span style="font-size:11px;opacity:.8;">Fichier : <code>' + (fname||'atc_sync_data.json') + '</code>',
+      '<br><span style="font-size:11px;opacity:.8;">Fichier : <code>' + (fname||'dm_planning_sync.json') + '</code>',
       ' — Cliquez le bouton jaune pour rétablir (requis après chaque redémarrage du navigateur)</span>',
     '</div>',
     '<button onclick="syncReconnect()" style="margin-left:auto;padding:6px 16px;background:#f59e0b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;white-space:nowrap;box-shadow:0 2px 4px rgba(0,0,0,.2);">',
@@ -2421,7 +2494,7 @@ function syncSetupNewFile() {
     return;
   }
   window.showSaveFilePicker({
-    suggestedName: 'atc_sync_data.json',
+    suggestedName: 'dm_planning_sync.json',
     types: [{ description: 'Fichier JSON ATC Sync', accept: {'application/json': ['.json']} }]
   }).then(function(handle) {
     SYNC.handle = handle;
@@ -2848,7 +2921,7 @@ function _syncUpdateModalUI() {
 
   // File info from IDB meta
   _idbGet(SK_SYNC_META, function(meta) {
-    var fname = (meta && meta.file) ? meta.file : 'atc_sync_data.json';
+    var fname = (meta && meta.file) ? meta.file : 'dm_planning_sync.json';
     if (fileDiv) {
       if (SYNC.httpMode && SYNC.active) {
         fileDiv.innerHTML = '\uD83C\uDF10 <strong>Mode HTTP :</strong> ' + _getSyncJsonUrl() +
@@ -2905,7 +2978,7 @@ function _syncUpdateModalUI() {
         '\uD83D\uDCC2&nbsp; Se connecter au fichier sync existant</button>' +
       '<div style="font-size:11px;color:var(--g600);padding:7px 10px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;line-height:1.6;">' +
         '<strong>Chef d\'Atelier :</strong> Cliquez "Se connecter", s\u00E9lectionnez le fichier ' +
-        '<code>atc_sync_data.json</code> cr\u00E9\u00E9 par le Dir. Mat\u00E9riel dans votre dossier r\u00E9seau partag\u00E9.' +
+        '<code>dm_planning_sync.json</code> cr\u00E9\u00E9 par le Dir. Mat\u00E9riel dans votre dossier r\u00E9seau partag\u00E9.' +
       '</div>';
     if (isDM) {
       html +=
@@ -3200,7 +3273,7 @@ function _applyLogin(role, saveSession) {
   setTimeout(_purgeSoftDeleted, 2000);
 
   // ── SYNC : Firebase est la source unique de données ────────
-  // Le polling HTTP vers atc_sync_data.json est définitivement désactivé.
+  // Le polling HTTP vers fichier JSON local est définitivement désactivé.
   // La synchronisation est gérée par le listener Firebase Realtime Database
   // déclenché dans _fbStartSync() après l'authentification Google.
   //
