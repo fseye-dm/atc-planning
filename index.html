@@ -2022,14 +2022,21 @@ function _fbOnSignedIn(user) {
       '&nbsp;&nbsp;<span style="font-size:10px;opacity:.8;">' + (role === 'dm' ? '\ud83d\udc54 Dir. Mat\u00e9riel' : '\ud83d\udd27 Chef d\'Atelier') + '</span>';
   }
   // ── Connexion Google réussie → entrer dans l'application directement ──
-  // Plus besoin de mot de passe : Google Auth fait office d'authentification
   selRole(role);
 
   // Entrer dans l'application sans passer par le formulaire de mot de passe
   _applyLogin(role, true);
 
-  // Démarrer la synchronisation Firebase (après _applyLogin qui masque le login screen)
+  // Démarrer la synchronisation Firebase
   _fbStartSync(role);
+
+  // Recharger Gestion Base si ouvert pour afficher le statut Firebase correct
+  setTimeout(function() {
+    var pg = (document.getElementById('ptitle') || {}).textContent || '';
+    if (pg.indexOf('Gestion') > -1 || pg.indexOf('Admin') > -1) {
+      showPage('admin');
+    }
+  }, 500);
 
   toast('\u2601 Connect\u00e9 avec Google : ' + (user.displayName || email));
 }
@@ -2044,7 +2051,7 @@ function _fbOnSignedOut() {
 function _fbStartSync(role) {
   if (!_fbDB) return;
   _fbStopListener();
-  SYNC.active = true;
+  SYNC.active = false;   // Firebase remplace la sync locale — ne pas activer les boutons réseau
   SYNC.httpMode = false;
   _fbSetCloudBadge('syncing', '☁ Connexion...');
 
@@ -3832,91 +3839,59 @@ if (ROLE === 'dm') {
     '</div>';
 }
 
-var syncStatusHtml = '';
-  var sColors = { ok:'#10b981', syncing:'#3b82f6', error:'#ef4444', permission:'#eab308', inactive:'#94a3b8', conflict:'#f97316' };
-  var sc = sColors[SYNC.status] || '#94a3b8';
-  var syncLabels = {
-    ok:         '\u2705 Synchronisation active \u2014 polling toutes les 5s',
-    syncing:    '\uD83D\uDD04 Connexion en cours...',
-    error:      '\u26A0\uFE0F Erreur de synchronisation \u2014 fichier inaccessible',
-    permission: '\uD83D\uDD11 Permission requise apr\u00E8s rechargement \u2014 cliquez Reconnecter',
-    inactive:   '\u2B1C Non configur\u00E9e \u2014 aucun fichier s\u00E9lectionn\u00E9',
-    conflict:   '\u26A1 Conflits d\u00E9tect\u00E9s \u2014 priorit\u00E9 DM appliqu\u00E9e'
-  };
-  var hasHandle = !!SYNC.handle;
+// ── Statut Firebase pour Gestion Base ──────────────────────
+  var fbUser = (_fbAuth && _fbAuth.currentUser) ? _fbAuth.currentUser : null;
+  var fbEmail = fbUser ? fbUser.email : '';
+  var fbName  = fbUser ? (fbUser.displayName || fbEmail) : '';
+  var fbConnected = (_fbReady && _fbDB && fbUser);
 
-  // Show file name from IDB meta if available
-  syncStatusHtml =
-    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">' +
-      '<div style="width:10px;height:10px;border-radius:50%;background:' + sc + ';flex-shrink:0;animation:' + (SYNC.active?'pulse 2s infinite':'none') + '"></div>' +
-      '<span style="font-size:12px;font-weight:600;color:' + sc + ';">' + (syncLabels[SYNC.status] || SYNC.status) + '</span>' +
-    '</div>' +
-    '<div id="sync-file-name" style="font-size:11px;color:var(--g600);margin-bottom:10px;padding:6px 10px;background:var(--g50);border-radius:5px;border:1px solid var(--g200);">' +
-      (SYNC.active ? '\uD83D\uDCC4 Fichier sync actif' : (hasHandle ? '\uD83D\uDD11 Fichier connu \u2014 permission \u00E0 renouveler (cliquez Reconnecter)' : '\u2B1C Aucun fichier de synchronisation configur\u00E9')) +
-    '</div>';
+  var syncStatusHtml = fbConnected
+    ? '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;margin-bottom:10px;">' +
+        '<div style="width:10px;height:10px;border-radius:50%;background:#10b981;flex-shrink:0;animation:pulse 2s infinite;"></div>' +
+        '<div>' +
+          '<span style="font-size:12px;font-weight:700;color:#166534;">\u2601 Firebase Cloud actif — synchronisation temps r\u00e9el ON</span><br>' +
+          '<span style="font-size:11px;color:#16a34a;">Connect\u00e9 : ' + fbName + ' (' + fbEmail + ')</span>' +
+        '</div>' +
+      '</div>'
+    : '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;margin-bottom:10px;">' +
+        '<div style="width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0;"></div>' +
+        '<div>' +
+          '<span style="font-size:12px;font-weight:700;color:#991b1b;">\u26d4 Firebase non connect\u00e9</span><br>' +
+          '<span style="font-size:11px;color:#b91c1c;">Cliquez "Se connecter avec Google" sur la page de connexion.</span>' +
+        '</div>' +
+      '</div>';
 
-  var btnReconn = (hasHandle || SYNC.active)
-    ? '<button class="btn bp sm" style="background:#1d4ed8;color:#fff;" onclick="syncReconnect()">\uD83D\uDD11 Reconnecter</button>'
+  // Boutons Firebase uniquement (plus de boutons réseau local)
+  var btnReconn = '';
+  var btnForce = fbConnected
+    ? '<button class="btn bp sm" style="background:#10b981;color:#fff;" onclick="_fbWriteToCloud();toast(\'\u2601 Donn\u00e9es envoy\u00e9es vers Firebase.\');">\u2191 Pousser vers Firebase</button>' +
+      '<button class="btn bs sm" onclick="_fbStartSync(ROLE);toast(\'\uD83D\uDD04 Rechargement depuis Firebase...\');">\u2193 Recharger depuis Firebase</button>'
     : '';
-  var btnForce = SYNC.active
-    ? '<button class="btn bp sm" style="background:#7c3aed;color:#fff;" onclick="_syncWrite();toast(\'\u2705 Données poussées vers le fichier partagé.\');">\u2191 Forcer envoi</button>' +
-      '<button class="btn bs sm" onclick="_syncRead();toast(\'\uD83D\uDD04 Lecture du fichier partagé...\');">\u2193 Lire maintenant</button>' +
-      '<button class="btn bs sm" style="color:#10b981;border-color:#10b981;" onclick="syncDiagnostic()">\u26A1 Diagnostic</button>'
-    : '';
-  var btnDisconn = (SYNC.active || hasHandle)
-    ? '<button class="btn bs sm" style="color:#ef4444;border-color:#ef4444;" onclick="syncDisconnect()">\uD83D\uDD0C D\u00E9connecter</button>'
+  var btnDisconn = fbConnected
+    ? '<button class="btn bs sm" style="color:#ef4444;border-color:#ef4444;" onclick="_fbSignOut();toast(\'D\u00e9connexion effectu\u00e9e.\');">Se d\u00e9connecter</button>'
     : '';
 
   return '<div style="max-width:860px;">' +
 
     // ============ SYNC PANEL (visible par tous) ============
-    '<div class="admin-card" style="border:2px solid #1d4ed8;background:linear-gradient(135deg,#eff6ff,#fff);">' +
-      '<div class="admin-card-title" style="color:#1d4ed8;">&#128257; Synchronisation R\u00E9seau Local</div>' +
+    '<div class="admin-card" style="border:2px solid #10b981;background:linear-gradient(135deg,#f0fdf4,#fff);">' +
+      '<div class="admin-card-title" style="color:#065f46;">&#9729;&#65039; Synchronisation Cloud Firebase — Temps R\u00e9el</div>' +
 
-      // Explication simple pour tous les profils
-      '<div style="background:#dbeafe;border:1px solid #3b82f6;border-radius:6px;padding:10px 12px;font-size:11px;color:#1e3a8a;margin-bottom:12px;line-height:1.8;">' +
-        '<strong>Comment \u00e7a marche :</strong><br>' +
-        '1\uFE0F\u20E3 <strong>DM :</strong> Cr\u00E9e le fichier sync dans le <strong>dossier r\u00E9seau partag\u00E9</strong> (une seule fois).<br>' +
-        '2\uFE0F\u20E3 <strong>Chef :</strong> Ouvre ce m\u00EAme fichier avec le bouton "Ouvrir fichier sync" (une seule fois par PC).<br>' +
-        '3\uFE0F\u20E3 Polling toutes les <strong>5 secondes</strong>. Priorit\u00E9 DM en cas de conflit.<br>' +
-        '<strong style="color:#dc2626;">\u26A0 Apr\u00E8s redémarrage du navigateur</strong> : cliquez <strong>"Reconnecter"</strong> (sécurité navigateur — inévitable mais automatisé à la connexion).' +
+      '<div style="background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:10px 12px;font-size:11px;color:#14532d;margin-bottom:12px;line-height:1.8;">' +
+        '<strong>\u2705 Comment \u00e7a marche (Firebase) :</strong><br>' +
+        '\u2022 Chaque modification est envoy\u00e9e vers Firebase en moins de 1 seconde.<br>' +
+        '\u2022 L\'autre PC re\u00e7oit la mise \u00e0 jour automatiquement sans rechargement (F5).<br>' +
+        '\u2022 En cas de modification simultan\u00e9e : le Smart Merge applique les r\u00e8gles de priorit\u00e9 DM/Chef.<br>' +
+        '\u2022 Hors-ligne : les donn\u00e9es sont sauvegard\u00e9es localement et synchronis\u00e9es au retour de la connexion.' +
       '</div>' +
 
       fbAdminHtml +
 
       syncStatusHtml +
 
-      // Boutons d'action
       '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">' +
-        btnReconn + btnForce + btnDisconn +
+        btnForce + btnDisconn +
       '</div>' +
-
-      // Aide diagnostic pour les problèmes de sync
-      (SYNC.active
-        ? '<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:8px 12px;font-size:11px;color:#166534;margin-bottom:8px;">' +
-            '<strong>\u2705 Sync active</strong> — Le bouton <strong>"\u26A1 Diagnostic"</strong> écrit un test dans le fichier et vérifie qu\'il est lu. ' +
-            'Si le diagnostic réussit sur les 2 PC, la sync fonctionne.' +
-          '</div>'
-        : '') +
-
-      (!SYNC.active && !hasHandle
-        ? '<div style="background:#f0fdf4;border:1px solid #10b981;border-radius:6px;padding:10px 12px;font-size:11px;margin-bottom:10px;line-height:1.8;">' +
-            '<strong>\uD83D\uDCA1 Mise en service (1\u00E8re fois)</strong><br>' +
-            '<strong>Ordinateur DM :</strong> Cliquez "Cr\u00E9er fichier sync" \u2192 choisir un emplacement dans votre dossier r\u00E9seau partag\u00E9.<br>' +
-            '<strong>Ordinateur Chef :</strong> Cliquez "Ouvrir fichier sync existant" \u2192 naviguer jusqu\'au m\u00EAme dossier r\u00E9seau \u2192 s\u00E9lectionner le fichier.' +
-          '</div>' +
-          '<div style="display:flex;gap:8px;">' +
-            '<button class="btn bp sm" style="background:#1d4ed8;color:#fff;" onclick="syncSetupNewFile()">&#128228; Cr\u00E9er fichier sync (DM)</button>' +
-            '<button class="btn bs sm" onclick="syncConnectExistingFile()">&#128194; Ouvrir fichier sync existant</button>' +
-          '</div>'
-        : '') +
-
-      (!SYNC.active && hasHandle
-        ? '<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:8px 12px;font-size:11px;color:#92400e;margin-bottom:8px;line-height:1.6;">' +
-            '\uD83D\uDD11 <strong>Fichier sync connu</strong> — Permission expirée (normal apr\u00E8s redémarrage navigateur).<br>' +
-            'Cliquez <strong>"Reconnecter"</strong> pour que le navigateur autorise à nouveau l\'accès au fichier réseau.' +
-          '</div>'
-        : '') +
 
     '</div>' +
 
