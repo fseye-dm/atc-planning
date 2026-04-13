@@ -760,7 +760,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v11.6';
+var APP_VERSION = 'v11.7';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -2203,7 +2203,8 @@ function _fbWriteToCloud() {
         if (value && typeof value === 'object' && !Array.isArray(value)) {
           var replacement = {};
           for (var k in value) {
-            var cleanKey = k.replace(/\./g, '_');
+            // Firebase interdit dans les clés : . # $ / [ ] espaces
+            var cleanKey = k.replace(/[.#$\/\[\]\s]/g, '_');
             replacement[cleanKey] = value[k];
           }
           return replacement;
@@ -2220,7 +2221,10 @@ function _fbWriteToCloud() {
       }).catch(function(err) {
         _fbSetCloudBadge('error', '☁ Erreur écriture');
         _saveLocalOnly();
-        console.error('Firebase write:', err);
+        console.error('Firebase write error:', err.code, err.message);
+        var st = document.getElementById('cfg-save-status');
+        if (st) st.innerHTML = '<span style="color:#ef4444;">❌ Firebase : ' + (err.code||'') + ' — ' + (err.message||'') + '</span>';
+        toast('❌ Firebase échec : ' + (err.code || err.message));
       });
     } catch(e) {
       console.error('Firebase write prep:', e);
