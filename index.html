@@ -1040,6 +1040,7 @@ function _syncPayload() {
     hist:        APP.hist,
     planning:    APP.planning,
     masterplan:  APP.masterplan,
+    masterplanLocked: APP.masterplanLocked || false,
     taches:      APP.taches || [],
     tacheTypes:  APP.tacheTypes || ['01-MECANIQUE','02-ELECTRIQUE','03-HYDRAULIQUE','04-DIAGNOSTIC','05-PNEUMATIQUE','06-SOUDURE','07-CARROSSERIE','08-ADMINISTRATIVES','09-AUTRES'],
     suiviTaches: APP.suiviTaches || {},
@@ -1261,6 +1262,25 @@ function _syncMerge(remote) {
         applyField(APP.masterplan, k, rVal, 'mp.cell', 'Master Plan ' + k, k);
       }
     });
+  }
+
+  // ── Verrouillage Master Planning (DM prioritaire) ─────────────
+  // masterplanLocked est défini par le DM — toujours prioritaire
+  if (typeof remote.masterplanLocked === 'boolean') {
+    var remoteLockTs = (remote._fieldTs && remote._fieldTs['masterplanLocked']) || 0;
+    var localLockTs  = (APP.fieldTs && APP.fieldTs['masterplanLocked']) || 0;
+    // Si le remote est plus récent OU si c'est le DM qui a écrit → appliquer
+    if (remoteLockTs >= localLockTs || remote._by === 'dm') {
+      if (APP.masterplanLocked !== remote.masterplanLocked) {
+        APP.masterplanLocked = remote.masterplanLocked;
+        changed = true;
+        // Rafraîchir le Master Planning si visible
+        var pg = (document.getElementById('ptitle') || {}).textContent || '';
+        if (pg.indexOf('Master') > -1) {
+          try { renderMP(); } catch(e) {}
+        }
+      }
+    }
   }
 
   // ══════════════════════════════════════════════════════════
@@ -5218,18 +5238,44 @@ function renderMP() {
 }
 
 function lockMP() {
+  if (ROLE !== 'dm') { toast('\u26d4 Seul le Dir. Mat\u00e9riel peut verrouiller le plan.'); return; }
   APP.masterplanLocked = true;
   _stampField('masterplanLocked');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud(); // synchroniser IMMÉDIATEMENT
-  toast('\uD83D\uDD12 Plan verrouill\u00e9 — aucune modification possible.');
+  // Push immédiat SANS debounce — le Chef doit voir le verrou en < 1s
+  if (_fbReady && _fbDB && _fbAuth && _fbAuth.currentUser) {
+    var raw = JSON.parse(_syncPayload());
+    var payload = JSON.parse(JSON.stringify(raw, function(k,v){
+      if(v&&typeof v==='object'&&!Array.isArray(v)){var r={};for(var key in v){r[sanitizeKey(key)]=v[key];}return r;}
+      return v;
+    }));
+    SYNC._fbLastWriteTs = payload._ts||0;
+    _fbDB.ref('atcdata').set(payload).then(function(){
+      _fbSetCloudBadge('ok','\u2601 Verrou envoy\u00e9');
+      console.log('Firebase: masterplanLocked=true envoy\u00e9');
+    }).catch(function(e){ console.error('lockMP push:',e); });
+  }
+  toast('\uD83D\uDD12 Plan verrouill\u00e9 \u2014 aucune modification possible.');
   renderMP();
 }
 function unlockMP() {
+  if (ROLE !== 'dm') { toast('\u26d4 Seul le Dir. Mat\u00e9riel peut d\u00e9verrouiller.'); return; }
   APP.masterplanLocked = false;
   _stampField('masterplanLocked');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud(); // synchroniser IMMÉDIATEMENT
+  // Push immédiat SANS debounce
+  if (_fbReady && _fbDB && _fbAuth && _fbAuth.currentUser) {
+    var raw2 = JSON.parse(_syncPayload());
+    var payload2 = JSON.parse(JSON.stringify(raw2, function(k,v){
+      if(v&&typeof v==='object'&&!Array.isArray(v)){var r={};for(var key in v){r[sanitizeKey(key)]=v[key];}return r;}
+      return v;
+    }));
+    SYNC._fbLastWriteTs = payload2._ts||0;
+    _fbDB.ref('atcdata').set(payload2).then(function(){
+      _fbSetCloudBadge('ok','\u2601 D\u00e9verrou envoy\u00e9');
+      console.log('Firebase: masterplanLocked=false envoy\u00e9');
+    }).catch(function(e){ console.error('unlockMP push:',e); });
+  }
   toast('\uD83D\uDD13 Plan d\u00e9verrouill\u00e9.');
   renderMP();
 }
