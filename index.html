@@ -1,5 +1,27 @@
 
 <!DOCTYPE html>
+<!-- ============================================================
+  DM-PLANNING v12.0 — SOSETER HYDRO — F. SEYE — Directeur Matériel
+  
+  Changelog v12.0 (2026-04) :
+  ✅ sanitizeKey() — nettoyage universel clés Firebase (. # $ / [ ] espaces)
+  ✅ delAgent() — soft-delete avec flag deleted:true + push Firebase immédiat
+  ✅ _syncMerge agents — agents supprimés ne ressuscitent plus jamais
+  ✅ validateSuiviTache — timestamp + alerte si statut OK mais tâche dé-validée
+  ✅ MP_LOCKED → APP.masterplanLocked (synchronisé Firebase)
+  ✅ Historique — tri décroissant (plus récent en haut)
+  ✅ autoRefreshUI — pause si l'utilisateur édite un champ (Ordonnancement)
+  ✅ Master Planning — badge compteur [P] par colonne-mois
+  ✅ Logo — upload fichier image → base64 synchronisé Firebase
+  ✅ Planning Hebdo — onglets Samedi + Dimanche/Bilan ajoutés
+  ✅ Suivi des Tâches — select types de tâches configurables (Gestion Base DM)
+  ✅ toast() — durée variable (alertes longues)
+  ✅ Console — suppression erreurs setValueAndClosePopup/Cross-Origin
+  ✅ Firebase — liaison vérifiée et fonctionnelle
+  
+  Firebase config : dm-planning-soseter | Emails : fseye2018@gmail.com (DM) | souleyecisse017@gmail.com (Chef)
+  GitHub Pages : https://fseye-dm.github.io/atc-planning/
+============================================================ -->
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
@@ -493,7 +515,9 @@ textarea{resize:vertical;min-height:60px}
         <div class="tab" id="tab-mardi" onclick="switchPlan('mardi')">Mardi</div>
         <div class="tab" id="tab-mercredi" onclick="switchPlan('mercredi')">Mercredi</div>
         <div class="tab" id="tab-jeudi" onclick="switchPlan('jeudi')">Jeudi</div>
-        <div class="tab" id="tab-vendredi" onclick="switchPlan('vendredi')">Vendredi &mdash; Bilan</div>
+        <div class="tab" id="tab-vendredi" onclick="switchPlan('vendredi')">Vendredi</div>
+        <div class="tab" id="tab-samedi" onclick="switchPlan('samedi')">Samedi</div>
+        <div class="tab" id="tab-dimanche" onclick="switchPlan('dimanche')">Dimanche / Bilan</div>
       </div>
       <div id="plan-content"></div>
     </div>
@@ -760,7 +784,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v11.7';
+var APP_VERSION = 'v12.0';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1017,6 +1041,7 @@ function _syncPayload() {
     planning:    APP.planning,
     masterplan:  APP.masterplan,
     taches:      APP.taches || [],
+    tacheTypes:  APP.tacheTypes || ['01-MECANIQUE','02-ELECTRIQUE','03-HYDRAULIQUE','04-DIAGNOSTIC','05-PNEUMATIQUE','06-SOUDURE','07-CARROSSERIE','08-ADMINISTRATIVES','09-AUTRES'],
     suiviTaches: APP.suiviTaches || {},
     pw:          APP.pw
   });
@@ -1384,6 +1409,11 @@ function _syncMerge(remote) {
   // ══════════════════════════════════════════════════════════
   if (remote.agents && Array.isArray(remote.agents)) {
     remote.agents.forEach(function(ra) {
+      // Ne jamais restaurer un agent marqué comme supprimé
+      if (ra.deleted) return;
+      // Ignorer si l'agent a été supprimé localement par le DM
+      var localDeleted = APP._deletedAgentIds && APP._deletedAgentIds.indexOf(ra.id) > -1;
+      if (localDeleted) return;
       var la = APP.agents.find(function(a) { return a.id === ra.id; });
       if (!la) {
         APP.agents.push(ra); changed = true;
@@ -1564,6 +1594,16 @@ function _showMergeNotif(by, log) {
 // ── Clé localStorage pour signaler un redirect en cours
 var _FB_REDIRECT_KEY = 'dm_fb_redirect_pending';
 var _fbInitRetries = 0;
+
+// ════════════════════════════════════════════════════════════════
+// SANITIZE KEY — Nettoyage universel des clés Firebase
+// Firebase interdit dans les clés : . # $ / [ ] et les espaces
+// Usage : sanitizeKey('fseye2018@gmail.com') → 'fseye2018_gmail_com'
+// ════════════════════════════════════════════════════════════════
+function sanitizeKey(str) {
+  if (typeof str !== 'string') return String(str || '').replace(/[.#$\/\[\]\s]/g, '_');
+  return str.replace(/[.#$\/\[\]\s]/g, '_');
+}
 
 // ════════════════════════════════════════════════════════════════
 // CHARGEUR FIREBASE DYNAMIQUE SÉQUENTIEL
@@ -1908,6 +1948,41 @@ function _fbSignIn() {
   });
 }
 
+// Conversion logo fichier → base64
+function handleLogoUpload(input) {
+  if (!input.files || !input.files[0]) return;
+  var file = input.files[0];
+  if (file.size > 300000) { // max 300KB
+    toast('⚠️ Image trop grande (max 300KB). Compressez l\'image avant.');
+    return;
+  }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var b64 = e.target.result;
+    APP_CONFIG.logoUrl = b64;
+    var hiddenInput = document.getElementById('cfg-logo-url');
+    if (hiddenInput) hiddenInput.value = b64;
+    // Aperçu immédiat
+    var panel = document.getElementById('fb-config-panel');
+    if (panel) {
+      var imgs = panel.querySelectorAll('img');
+      if (imgs.length) { imgs[0].src = b64; }
+      else {
+        var img = document.createElement('img');
+        img.src = b64;
+        img.style.cssText = 'height:32px;border-radius:4px;border:1px solid #e2e8f0;';
+        var fileInput = document.getElementById('cfg-logo-file');
+        if (fileInput && fileInput.parentNode) fileInput.parentNode.insertBefore(img, fileInput);
+      }
+    }
+    // Mettre à jour le logo visible dans l'app
+    var logoImgs = document.querySelectorAll('.lb-logo img, #app-logo');
+    logoImgs.forEach(function(img){ img.src = b64; });
+    toast('✅ Logo chargé — cliquez "Sauvegarder config" pour le synchroniser.');
+  };
+  reader.readAsDataURL(file);
+}
+
 // ══ Admin: Sauvegarder la configuration dans Firebase /config ══
 function saveFirebaseConfig() {
   var dmEmail   = (document.getElementById('cfg-dm-email')   || {}).value   || '';
@@ -2204,7 +2279,7 @@ function _fbWriteToCloud() {
           var replacement = {};
           for (var k in value) {
             // Firebase interdit dans les clés : . # $ / [ ] espaces
-            var cleanKey = k.replace(/[.#$\/\[\]\s]/g, '_');
+            var cleanKey = sanitizeKey(k);
             replacement[cleanKey] = value[k];
           }
           return replacement;
@@ -2363,10 +2438,23 @@ function _syncReadFSAPI() {
 function autoRefreshUI() {
   var pg = (document.getElementById('ptitle') || {}).textContent || '';
 
+  // Ne pas rafraîchir si l'utilisateur est en train d'éditer un champ
+  var ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) {
+    // Champ en cours d'édition — reporter le refresh de 2s
+    if (!autoRefreshUI._pending) {
+      autoRefreshUI._pending = setTimeout(function() {
+        autoRefreshUI._pending = null;
+        autoRefreshUI();
+      }, 2000);
+    }
+    return;
+  }
+  if (autoRefreshUI._pending) { clearTimeout(autoRefreshUI._pending); autoRefreshUI._pending = null; }
+
   // Sauvegarder l'état des champs actifs avant le rendu
-  var activeId  = document.activeElement ? document.activeElement.id : null;
-  var activeVal = document.activeElement && document.activeElement.value !== undefined
-                  ? document.activeElement.value : null;
+  var activeId  = ae ? ae.id : null;
+  var activeVal = ae && ae.value !== undefined ? ae.value : null;
 
   // Ne pas rafraîchir si un modal est ouvert (évite de vider les formulaires)
   var openModal = document.querySelector('.mo.show');
@@ -3038,6 +3126,29 @@ function _syncUpdateModalUI() {
 // ============================================================
 // EXPORT EXCEL (DM only)
 // ============================================================
+
+// ── Gestion des types de tâches (configurable par le DM)
+function addTacheType() {
+  var input = document.getElementById('new-tache-type');
+  var val = (input ? input.value.trim().toUpperCase() : '');
+  if (!val) { toast('Saisissez un nom de type.'); return; }
+  if (!APP.tacheTypes) APP.tacheTypes = [];
+  if (APP.tacheTypes.indexOf(val) > -1) { toast('Ce type existe déjà.'); return; }
+  APP.tacheTypes.push(val);
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  showPage('admin');
+  toast('✅ Type "' + val + '" ajouté.');
+}
+function removeTacheType(val) {
+  if (!confirm('Supprimer le type "' + val + '" ?')) return;
+  APP.tacheTypes = (APP.tacheTypes || []).filter(function(t){ return t !== val; });
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  showPage('admin');
+  toast('✅ Type "' + val + '" supprimé.');
+}
+
 function exportBaseExcel() {
   if (!window.XLSX) { toast('❌ Bibliothèque XLSX non chargée.'); return; }
   var wb = XLSX.utils.book_new();
@@ -3409,8 +3520,9 @@ var PTITLES = {
   suivi:'Suivi des Tâches'
 };
 
-// v5: Plan lock state
-var MP_LOCKED = false;
+// v5: Plan lock — synchronisé via Firebase dans APP.masterplanLocked
+// MP_LOCKED remplacé par isMPLocked() pour éviter le conflit Object.defineProperty
+function isMPLocked() { return !!(APP && APP.masterplanLocked); }
 
 function showPage(pg) {
   document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
@@ -3829,9 +3941,12 @@ if (ROLE === 'dm') {
             'style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;">' +
         '</div>' +
         '<div>' +
-          '<label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px;">URL Logo (optionnel)</label>' +
-          '<input id="cfg-logo-url" type="url" value="' + APP_CONFIG.logoUrl + '" ' +
-            'style="width:100%;padding:6px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;" placeholder="https://...">' +
+          '<label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;display:block;margin-bottom:4px;">Logo (Fichier Image)</label>' +
+          '<div style="display:flex;align-items:center;gap:8px;">' +
+            (APP_CONFIG.logoUrl ? '<img src="' + APP_CONFIG.logoUrl + '" style="height:32px;border-radius:4px;border:1px solid #e2e8f0;" alt="logo">' : '') +
+            '<input id="cfg-logo-file" type="file" accept="image/*" style="font-size:11px;" onchange="handleLogoUpload(this)">' +
+          '</div>' +
+          '<input id="cfg-logo-url" type="hidden" value="' + APP_CONFIG.logoUrl + '">' +
         '</div>' +
       '</div>' +
       '<div style="display:flex;gap:8px;">' +
@@ -3937,6 +4052,23 @@ if (ROLE === 'dm') {
       '<div style="display:flex;gap:8px;align-items:center;">' +
         '<button class="btn bp sm" style="background:#10b981;color:#fff;font-size:12px;padding:8px 18px;" onclick="exportBaseExcel()">&#128229; Télécharger Excel (.xlsx)</button>' +
         '<span style="font-size:11px;color:var(--g400);">' + _activeEquips().length + ' équipements · ' + APP.agents.length + ' agents · ' + (APP.taches||[]).length + ' tâches</span>' +
+      '</div>' +
+    '</div>' +
+
+    // ============ TYPES DE TÂCHES (DM uniquement) ============
+    '<div class="admin-card" style="border:1px solid #f97316;background:linear-gradient(135deg,#fff7ed,#fff);">' +
+      '<div class="admin-card-title" style="color:#c2410c;">&#128295; Types de Tâches — Configuration</div>' +
+      '<div style="font-size:11px;color:var(--g600);margin-bottom:10px;">Gérez la liste des types de tâches disponibles dans le module Suivi. Chaque type peut être ajouté ou supprimé.</div>' +
+      '<div id="tache-types-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">' +
+        (APP.tacheTypes || []).map(function(t) {
+          return '<span style="display:inline-flex;align-items:center;gap:4px;background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:3px 10px;font-size:11px;">' +
+            t + '<button onclick="removeTacheType(\'' + t + '\')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;padding:0;margin-left:2px;">&times;</button>' +
+          '</span>';
+        }).join('') +
+      '</div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<input id="new-tache-type" type="text" placeholder="Ex: 10-PEINTURE" style="font-size:11px;padding:6px 10px;border:1px solid var(--g200);border-radius:6px;flex:1;">' +
+        '<button class="btn bp sm" style="background:#f97316;color:#fff;" onclick="addTacheType()">+ Ajouter</button>' +
       '</div>' +
     '</div>' +
 
@@ -4830,11 +4962,11 @@ function renderMP() {
   else if (hideOK) equips = equips.filter(function(e) { return e.statut !== 'OK'; });
 
   // Lock bar
-  var lockBar = MP_LOCKED ?
+  var lockBar = isMPLocked() ?
     '<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:7px 12px;font-size:12px;color:#92400e;display:flex;align-items:center;gap:8px;margin-bottom:8px;">&#128274; Le plan est verrouillé par le Directeur Matériel. Aucune modification possible.' +
     (ROLE==='dm'?'<button class="btn bp sm" style="margin-left:auto;" onclick="unlockMP()">&#128275; Déverrouiller</button>':'') + '</div>' : '';
   if (ROLE==='dm') {
-    var lockBtn = MP_LOCKED ? '' : '<button class="btn bs sm" style="margin-left:auto;" onclick="lockMP()">&#128274; Verrouiller</button>';
+    var lockBtn = isMPLocked() ? '' : '<button class="btn bs sm" style="margin-left:auto;" onclick="lockMP()">&#128274; Verrouiller</button>';
   } else { lockBtn = ''; }
 
   if (!equips.length) {
@@ -4845,10 +4977,21 @@ function renderMP() {
   equips.forEach(function(e) { if (fams.indexOf(e.famille) === -1) fams.push(e.famille); });
   fams.sort();
   var h = lockBar;
-  if (ROLE==='dm') h += '<div style="text-align:right;margin-bottom:8px;">' + (MP_LOCKED?'':'<button class="btn bs sm" onclick="lockMP()">&#128274; Verrouiller le plan</button>') + '</div>';
+  if (ROLE==='dm') h += '<div style="text-align:right;margin-bottom:8px;">' + (isMPLocked()?'':'<button class="btn bs sm" onclick="lockMP()">&#128274; Verrouiller le plan</button>') + '</div>';
   h += '<table class="mp-tbl"><thead><tr><th class="fcol" style="min-width:160px;">Famille / Code</th>' +
     '<th style="min-width:120px;font-size:10px;color:var(--g400);">Résumé Anomalies</th>';
-  MONTHS6.forEach(function(m) { h += '<th style="min-width:65px;">' + m.l + '</th>'; });
+  MONTHS6.forEach(function(m) {
+    // Compter les cellules 'plan' pour ce mois
+    var planCount = 0;
+    equips.forEach(function(eq) {
+      var mp = APP.masterplan[eq.id] || {};
+      if (mp[m.key] === 'plan') planCount++;
+    });
+    var badge = planCount > 0
+      ? ' <span style="display:inline-block;background:#1d4ed8;color:#fff;border-radius:8px;font-size:9px;padding:1px 5px;margin-left:3px;font-weight:700;">' + planCount + '</span>'
+      : '';
+    h += '<th style="min-width:65px;text-align:center;">' + m.l + badge + '</th>';
+  });
   h += '</tr></thead><tbody>';
   fams.forEach(function(fam) {
     h += '<tr><td colspan="' + (2 + MONTHS6.length) + '" style="background:var(--b9);color:#fff;font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;padding:4px 9px;">' + fam + '</td></tr>';
@@ -4894,7 +5037,7 @@ function renderMP() {
         var val = APP.masterplan[key] || '';
         var cls = val === 'done' ? 'mpd' : val === 'plan' ? 'mpp' : 'mpe';
         var lbl = val === 'done' ? '&#10003;' : val === 'plan' ? 'P' : '&mdash;';
-        var clickable = (!MP_LOCKED || ROLE==='dm') ? ' onclick="toggleMP(\'' + e.id + '\',\'' + m.k + '\')"' : '';
+        var clickable = (!isMPLocked() || ROLE==='dm') ? ' onclick="toggleMP(\'' + e.id + '\',\'' + m.k + '\')"' : '';
         h += '<td class="mpc ' + cls + '"' + clickable + '>' + lbl + '</td>';
       });
       h += '</tr>';
@@ -4905,12 +5048,12 @@ function renderMP() {
 }
 
 function lockMP() {
-  MP_LOCKED = true;
+  APP.masterplanLocked = true;
   toast('&#128274; Plan verrouillé. Seul le DM peut modifier.');
   renderMP();
 }
 function unlockMP() {
-  MP_LOCKED = false;
+  APP.masterplanLocked = false;
   toast('&#128275; Plan déverrouillé.');
   renderMP();
 }
@@ -4930,7 +5073,7 @@ var curPlanDay = 'lundi';
 
 function switchPlan(day) {
   curPlanDay = day;
-  var days = ['lundi','mardi','mercredi','jeudi','vendredi'];
+  var days = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
   days.forEach(function(d) {
     var t = document.getElementById('tab-' + d);
     if (t) t.classList.toggle('active', d === day);
@@ -4948,8 +5091,8 @@ function renderPlanning() {
   if (datesEl) datesEl.textContent = wi.monday + ' \u2014 ' + wi.saturday;
   // Update tab labels with actual dates
   var monday = wi.mondayDate;
-  var days = ['lundi','mardi','mercredi','jeudi'];
-  var dayNames = ['Lundi','Mardi','Mercredi','Jeudi'];
+  var days = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+  var dayNames = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
   days.forEach(function(d, i) {
     var tabEl = document.getElementById('tab-' + d);
     if (tabEl) {
@@ -4964,7 +5107,8 @@ function renderPlanning() {
 
 function renderPlanDay(day) {
   var c = document.getElementById('plan-content');
-  if (day === 'vendredi') { renderBilan(c); return; }
+  if (day === 'dimanche') { renderBilan(c); return; }
+  if (day === 'samedi' && !(APP.planning.daily['samedi'])) APP.planning.daily['samedi'] = {};
   var dayData = APP.planning.daily[day] || {};
   var planned = APP.equips.filter(function(e) { return dayData[e.id] && dayData[e.id].included; });
   var pannes = APP.equips.filter(function(e) { return (e.statut === 'PANNE' || e.statut === 'MAINTENANCE') && !(dayData[e.id] && dayData[e.id].included); });
@@ -5423,7 +5567,12 @@ function buildSuiviTachesBody(eid) {
   }).join('');
 
   var addRow = '<div style="padding:8px 14px;border-top:1px solid var(--g100);display:flex;gap:8px;align-items:center;">' +
-    '<input type="text" id="newtache_nom_' + eid + '" placeholder="Nom tâche..." style="width:120px;font-size:11px;padding:4px 7px;border:1px solid var(--g200);border-radius:4px;">' +
+    '<select id="newtache_nom_' + eid + '" style="font-size:11px;padding:4px 7px;border:1px solid var(--g200);border-radius:4px;">' +
+      '<option value="">-- Type tâche --</option>' +
+      (APP.tacheTypes || ['01-MECANIQUE','02-ELECTRIQUE','03-HYDRAULIQUE','04-DIAGNOSTIC','05-PNEUMATIQUE','06-SOUDURE','07-CARROSSERIE','08-ADMINISTRATIVES','09-AUTRES']).map(function(t){
+        return '<option value="' + t + '">' + t + '</option>';
+      }).join('') +
+    '</select>' +
     '<input type="text" id="newtache_desc_' + eid + '" placeholder="Description..." style="flex:1;font-size:11px;padding:4px 7px;border:1px solid var(--g200);border-radius:4px;">' +
     '<button onclick="addSuiviTache(\'' + eid + '\')" class="btn bp sm" style="font-size:10px;white-space:nowrap;">+ Ajouter</button>' +
   '</div>';
@@ -5458,14 +5607,21 @@ function validateSuiviTache(eid, tid, isDone) {
   var t = taches.find(function(x){ return x.id === tid; });
   if (!t) return;
   t.done = isDone;
+  t.doneAt = Date.now();    // timestamp pour Smart Merge
+  t.doneBy = ROLE || 'chef'; // profil qui a validé
+  _stampField('suivi.' + tid);
   // Auto-update equip status if 100%
   var pct = computeEquipPct(eid);
+  var eq = APP.equips.find(function(e){ return e.id === eid; });
   if (pct >= 100) {
-    var eq = APP.equips.find(function(e){ return e.id === eid; });
     if (eq && eq.statut !== 'OK') {
       eq.statut = 'OK';
+      _stampField('equip.statut.' + eid);
       toast('✅ ' + eq.code + ' — 100% validé, statut → OK');
     }
+  } else if (!isDone && eq && eq.statut === 'OK') {
+    // Alerte : tâche dé-validée mais statut reste OK
+    toast('⚠️ Attention : Le statut de ' + eq.code + ' est toujours OK. Veuillez le modifier manuellement dans le module Équipements si nécessaire.', 5000);
   }
   saveApp();
   refreshSuiviBlock(eid);
@@ -5946,7 +6102,24 @@ function updAgent(id, field, val) {
   _stampField('agent.' + id + '.' + field);
   saveApp(); renderRH();
 }
-function delAgent(id) { if (!confirm('Supprimer ?')) return; APP.agents = APP.agents.filter(function(a) { return a.id!==id; }); saveApp(); renderRH(); }
+function delAgent(id) {
+  if (!confirm('Supprimer cet agent définitivement ? Cette action est irréversible.')) return;
+  // Soft-delete : marquer comme supprimé (ne jamais restaurer depuis Firebase)
+  var ag = APP.agents.find(function(a){ return a.id === id; });
+  if (ag) {
+    ag.deleted = true;
+    ag.deletedAt = Date.now();
+    ag.deletedBy = ROLE || 'dm';
+    _stampField('agent.deleted.' + id);
+  }
+  // Supprimer physiquement de la liste locale
+  APP.agents = APP.agents.filter(function(a){ return a.id !== id; });
+  saveApp();
+  // Pousser immédiatement vers Firebase
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  renderRH();
+  toast('✅ Agent supprimé définitivement.');
+}
 function saveAgent() {
   var nom = document.getElementById('na-nom').value.trim();
   if (!nom) { alert('Nom requis.'); return; }
@@ -6148,6 +6321,8 @@ function filterH() {
     if (q && (h.code+' '+h.desc).toLowerCase().indexOf(q)===-1) return false;
     return true;
   });
+  // Tri décroissant — plus récent en haut
+  filtered.sort(function(a, b) { return (b.date||'').localeCompare(a.date||''); });
   document.getElementById('h-body').innerHTML = !filtered.length
     ? '<tr><td colspan="7" style="text-align:center;padding:18px;color:var(--g400);">Aucun resultat.</td></tr>'
     : filtered.map(function(h) {
@@ -6351,10 +6526,10 @@ document.addEventListener('click', function(e) { if (e.target.classList.contains
 // ============================================================
 // TOAST
 // ============================================================
-function toast(msg) {
+function toast(msg, duration) {
   var t = document.getElementById('toast');
   t.textContent = msg; t.style.opacity = '1'; t.style.transform = 'translateY(0)';
-  setTimeout(function() { t.style.opacity = '0'; t.style.transform = 'translateY(8px)'; }, 2600);
+  setTimeout(function() { t.style.opacity = '0'; t.style.transform = 'translateY(8px)'; }, duration || 2600);
 }
 
 // ============================================================
@@ -6396,6 +6571,18 @@ window.addEventListener('offline', function() {
 });
 
 // On startup: restore sync handle + session + DB handle (F5 persistence)
+// Supprimer les erreurs de console liées à l'autocomplétion du navigateur
+window.addEventListener('error', function(e) {
+  if (e && e.message && (
+    e.message.indexOf('setValueAndClosePopup') > -1 ||
+    e.message.indexOf('Cross-Origin-Opener-Policy') > -1
+  )) {
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
+}, true);
+
 window.addEventListener('load', function() {
   _injectSignatures();          // Afficher version sur écran login
   setTimeout(_sessionRestore, 100);
