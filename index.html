@@ -784,7 +784,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v13.0';
+var APP_VERSION = 'v13.1';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1043,7 +1043,8 @@ function _syncPayload() {
     taches:      APP.taches || [],
     tacheTypes:  APP.tacheTypes || ['01-MECANIQUE','02-ELECTRIQUE','03-HYDRAULIQUE','04-DIAGNOSTIC','05-PNEUMATIQUE','06-SOUDURE','07-CARROSSERIE','08-ADMINISTRATIVES','09-AUTRES'],
     suiviTaches: APP.suiviTaches || {},
-    pw:          APP.pw
+    pw:          APP.pw,
+    _deletedAgentIds: APP._deletedAgentIds || []
   });
 }
 
@@ -1407,13 +1408,25 @@ function _syncMerge(remote) {
   // ══════════════════════════════════════════════════════════
   // 7. AGENTS — règles configurables
   // ══════════════════════════════════════════════════════════
+  // Fusionner la liste noire des agents supprimés (depuis Firebase)
+  if (remote._deletedAgentIds && Array.isArray(remote._deletedAgentIds)) {
+    if (!APP._deletedAgentIds) APP._deletedAgentIds = [];
+    remote._deletedAgentIds.forEach(function(did) {
+      if (APP._deletedAgentIds.indexOf(did) === -1) APP._deletedAgentIds.push(did);
+    });
+    var beforeLen = APP.agents.length;
+    APP.agents = APP.agents.filter(function(a) {
+      return APP._deletedAgentIds.indexOf(a.id) === -1;
+    });
+    if (APP.agents.length < beforeLen) changed = true;
+  }
+
   if (remote.agents && Array.isArray(remote.agents)) {
     remote.agents.forEach(function(ra) {
-      // Ne jamais restaurer un agent marqué comme supprimé
+      // Ne jamais restaurer un agent marqué deleted:true
       if (ra.deleted) return;
-      // Ignorer si l'agent a été supprimé localement par le DM
-      var localDeleted = APP._deletedAgentIds && APP._deletedAgentIds.indexOf(ra.id) > -1;
-      if (localDeleted) return;
+      // Ne jamais restaurer un agent dans la liste noire
+      if (APP._deletedAgentIds && APP._deletedAgentIds.indexOf(ra.id) > -1) return;
       var la = APP.agents.find(function(a) { return a.id === ra.id; });
       if (!la) {
         APP.agents.push(ra); changed = true;
@@ -2026,6 +2039,84 @@ function _fbPushNow() {
   }
 }
 
+
+// ════════════════════════════════════════════════════════════════
+// DIAGNOSTIC FIREBASE — Test complet de la liaison
+// ════════════════════════════════════════════════════════════════
+function runFirebaseDiagnostic() {
+  var panel = document.getElementById('fb-diag-results');
+  if (!panel) return;
+  panel.style.display = 'block';
+  panel.innerHTML = '<div style="color:#3b82f6;font-weight:600;">⏳ Diagnostic en cours...</div>';
+
+  var rows = [];
+  function row(ok, label, detail) {
+    rows.push({ok:ok, label:label, detail:detail||''});
+    panel.innerHTML = rows.map(function(r) {
+      return '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">' +
+        '<span style="flex-shrink:0;">' + (r.ok===true?'✅':r.ok===false?'❌':'⏳') + '</span>' +
+        '<div><strong>' + r.label + '</strong>' +
+          (r.detail ? '<br><span style="font-size:10px;color:#64748b;">' + r.detail + '</span>' : '') +
+        '</div></div>';
+    }).join('');
+  }
+
+  if (typeof firebase === 'undefined' || !firebase.apps || !firebase.apps.length) {
+    row(false, 'SDK Firebase non chargé'); return;
+  }
+  row(true, 'SDK Firebase chargé');
+
+  if (!_fbAuth) { row(false, 'Firebase Auth null'); return; }
+  row(true, 'Firebase Auth initialisé');
+
+  var user = _fbAuth.currentUser;
+  if (!user) { row(false, 'Aucun utilisateur connecté', 'Reconnectez-vous avec Google'); return; }
+  row(true, 'Utilisateur connecté', user.email);
+
+  if (!_fbDB) { row(false, 'Realtime Database null'); return; }
+  row(true, 'Realtime Database initialisée');
+
+  row(null, 'Test lecture /atcdata...', '');
+  _fbDB.ref('atcdata').once('value').then(function(snap) {
+    var val = snap.val();
+    var agCnt = val && val.agents ? val.agents.length : 0;
+    var eqCnt = val && val.equips ? val.equips.length : 0;
+    row(true, 'Lecture /atcdata OK', val ? (eqCnt + ' équipements, ' + agCnt + ' agents en base') : 'Base vide');
+
+    row(null, 'Test écriture...', '');
+    _fbDB.ref('atcdata/_diag').set({ts: Date.now(), by: ROLE||'dm'}).then(function() {
+      row(true, 'Écriture /atcdata OK');
+      _fbDB.ref('atcdata/_diag').remove();
+
+      var raw;
+      try { raw = JSON.parse(_syncPayload()); } catch(e) { row(false, 'Payload invalide', e.message); return; }
+      var aC = raw.agents ? raw.agents.length : 0;
+      var eC = raw.equips ? raw.equips.length : 0;
+      row(null, 'Écriture données réelles (' + eC + ' éq, ' + aC + ' agents)...', '');
+
+      var clean = JSON.parse(JSON.stringify(raw, function(k, v) {
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+          var rep = {}; for (var key in v) { rep[sanitizeKey(key)] = v[key]; } return rep;
+        }
+        return v;
+      }));
+
+      _fbDB.ref('atcdata').set(clean).then(function() {
+        row(true, '☁ ÉCRITURE RÉUSSIE', eC + ' équipements et ' + aC + ' agents envoyés vers Firebase.');
+        _fbSetCloudBadge('ok', '☁ Synchronisé');
+        SYNC._fbLastWriteTs = clean._ts || 0;
+        toast('☁ ' + eC + ' équipements et ' + aC + ' agents envoyés vers Firebase');
+      }).catch(function(err) {
+        row(false, 'Écriture données échouée', err.code + ' : ' + err.message);
+      });
+    }).catch(function(err) {
+      row(false, 'Écriture bloquée', err.code + ' : ' + err.message + ' — Vérifiez les règles Firebase');
+    });
+  }).catch(function(err) {
+    row(false, 'Lecture bloquée', err.code + ' : ' + err.message);
+  });
+}
+
 // ══ Admin: Sauvegarder la configuration dans Firebase /config ══
 function saveFirebaseConfig() {
   var dmEmail   = (document.getElementById('cfg-dm-email')   || {}).value   || '';
@@ -2209,6 +2300,24 @@ function _fbStartSync(role) {
   _fbSilentUploadOffline();
 
   // ── Lire une fois au démarrage (Single Source of Truth) ───
+  // D'abord lire les agents supprimés pour les bloquer avant le merge
+  _fbDB.ref('atcdata/_deletedAgents').once('value').then(function(dSnap) {
+    var deletedAgents = dSnap.val();
+    if (deletedAgents) {
+      if (!APP._deletedAgentIds) APP._deletedAgentIds = [];
+      Object.keys(deletedAgents).forEach(function(k) {
+        var entry = deletedAgents[k];
+        var aid = entry.id || k;
+        if (APP._deletedAgentIds.indexOf(aid) === -1) APP._deletedAgentIds.push(aid);
+      });
+      // Supprimer immédiatement ces agents de la liste locale
+      APP.agents = APP.agents.filter(function(a) {
+        return APP._deletedAgentIds.indexOf(a.id) === -1;
+      });
+      console.log('Firebase: agents supprimés chargés:', APP._deletedAgentIds.length);
+    }
+  }).catch(function(e){ console.warn('Firebase _deletedAgents:', e.message); });
+
   _fbDB.ref('atcdata').once('value').then(function(snap) {
     var remote = snap.val();
     if (remote && typeof remote === 'object') {
@@ -4005,9 +4114,11 @@ if (ROLE === 'dm') {
       '<div style="display:flex;gap:8px;">' +
         '<button class="btn bp sm" style="background:#7c3aed;color:#fff;" onclick="saveFirebaseConfig()">\uD83D\uDCBE Sauvegarder dans Firebase</button>' +
         '<button class="btn bs sm" onclick="loadFirebaseConfig()">\uD83D\uDD04 Recharger depuis Firebase</button>' +
+        '<button class="btn bp sm" style="background:#f97316;color:#fff;" onclick="runFirebaseDiagnostic()">\uD83D\uDD27 Diagnostic Firebase</button>' +
         '<button class="btn bs sm" style="color:#ef4444;" onclick="_fbSignOut();toast(\'D\u00e9connexion effectu\u00e9e.\');">Se d\u00e9connecter</button>' +
       '</div>' +
       '<div id="cfg-save-status" style="font-size:11px;margin-top:8px;"></div>' +
+      '<div id="fb-diag-results" style="display:none;margin-top:12px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;line-height:1.8;"></div>' +
     '</div>';
 }
 
@@ -6189,22 +6300,31 @@ function updAgent(id, field, val) {
 }
 function delAgent(id) {
   if (!confirm('Supprimer cet agent définitivement ? Cette action est irréversible.')) return;
-  // Soft-delete : marquer comme supprimé (ne jamais restaurer depuis Firebase)
-  var ag = APP.agents.find(function(a){ return a.id === id; });
-  if (ag) {
-    ag.deleted = true;
-    ag.deletedAt = Date.now();
-    ag.deletedBy = ROLE || 'dm';
-    _stampField('agent.deleted.' + id);
+
+  // 1. Persister la liste noire dans APP (survit aux rechargements via saveApp)
+  if (!APP._deletedAgentIds) APP._deletedAgentIds = [];
+  if (APP._deletedAgentIds.indexOf(id) === -1) APP._deletedAgentIds.push(id);
+
+  // 2. Écrire le flag deleted dans Firebase DIRECTEMENT (nœud /atcdata/_deletedAgents)
+  //    → l'autre profil lira ce nœud et ne restaurera jamais cet agent
+  if (_fbReady && _fbDB) {
+    _fbDB.ref('atcdata/_deletedAgents/' + sanitizeKey(id)).set({
+      id: id, deletedAt: Date.now(), deletedBy: ROLE || 'dm'
+    });
   }
-  // Supprimer physiquement de la liste locale
+
+  // 3. Supprimer physiquement de la liste locale
   APP.agents = APP.agents.filter(function(a){ return a.id !== id; });
+
+  // 4. Sauvegarder et pousser immédiatement
+  _stampField('agent.deleted.' + id);
   saveApp();
-  // Pousser immédiatement vers Firebase
   if (_fbReady && _fbDB) _fbWriteToCloud();
   renderRH();
-  toast('✅ Agent supprimé définitivement.');
+  toast('\u2705 Agent supprimé définitivement.');
 }
+
+
 function saveAgent() {
   var nom = document.getElementById('na-nom').value.trim();
   if (!nom) { alert('Nom requis.'); return; }
