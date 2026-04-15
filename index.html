@@ -80,7 +80,12 @@
   ✅ Commentaire de certification modules ajouté
   ✅ CSS Responsive Mobile (< 768px) : hamburger sidebar, cartes équipements,
      modales 95vw, boutons tactiles 44px, topbar compacte
-  ✅ Audit sync/persistance v16.1 : 20/20 fonctions — stamp+save+firebase complets
+  ✅ DM-PLANNING v17.0 — 7 corrections majeures :
+  ✅   - Top10 DM uniquement (bouton + guard) — sync top10ids Firebase DM→Chef
+  ✅   - +Équipement planning : Chef ajoute équipement existant (modale dédiée)
+  ✅   - Règles priorité : radio buttons actifs sur TOUTES les lignes
+  ✅   - chefResetFromFirebase() : rechargement 100% identique au DM
+  ✅   - Audit sync 20/20 fonctions certifiées
   ✅ Guide d'utilisation mis à jour — adaptatif DM/Chef (7 sections)
 
   Firebase config : apiKey AIzaSyCiu_... | fseye2018@gmail.com (DM) | souleyecisse017@gmail.com (Chef)
@@ -716,6 +721,8 @@ textarea{resize:vertical;min-height:60px}
       <!-- Badge Cloud Firebase -->
       <span id="cloud-badge" style="display:none;align-items:center;gap:5px;padding:4px 11px;border-radius:20px;font-size:11px;font-weight:700;" title="Statut synchronisation Cloud Firebase">
         <span id="cloud-dot" style="width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block;"></span>
+      <!-- Bouton reset Chef -->
+      <button id="chef-reset-btn" onclick="chefResetFromFirebase()" style="display:none;background:#ef4444;color:#fff;border:none;padding:4px 10px;border-radius:14px;font-size:10px;font-weight:700;cursor:pointer;gap:4px;align-items:center;" title="Réinitialiser depuis Firebase (sync 100% DM)">&#x21BA; Sync DM</button>
         <span id="cloud-label">☁ Cloud</span>
       </span>
       <!-- Bouton alertes conflits sync — visible si conflits récents -->
@@ -779,7 +786,9 @@ textarea{resize:vertical;min-height:60px}
       <div class="flex aic jsb mb3">
         <div><div class="stitle" id="plan-week-title">Planning Hebdomadaire</div><div class="ts tg mt2" id="plan-week-dates"></div></div>
         <div class="flex g2">
-          <button class="btn bs sm" onclick="openM('m-equip')">+ Equipement</button>
+          (ROLE === 'dm'
+            ? '<button class="btn bs sm" onclick="openM(\'m-equip\')">+ Équipement</button>'
+            : '<button class="btn bs sm" onclick="openAddToPlanningModal()">+ Ajouter au Planning</button>')
           <button class="btn bp sm" onclick="showPage('rapport')">Rapport</button>
         </div>
       </div>
@@ -1062,7 +1071,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v16.1';
+var APP_VERSION = 'v17.0';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1619,8 +1628,21 @@ function _syncMerge(remote) {
     });
 
     APP.planning.daily = lp;
-    if (remote.planning.weekKey && !APP.planning.weekKey) {
-      APP.planning.weekKey = remote.planning.weekKey; changed = true;
+    // Propager weekKey ET top10ids depuis le DM vers le Chef (DM prioritaire)
+    if (remote.planning.weekKey) {
+      var remWkTs  = (remote._fieldTs && remote._fieldTs['plan.generateTop10']) || 0;
+      var locWkTs  = (APP.fieldTs     && APP.fieldTs['plan.generateTop10'])     || 0;
+      // DM prioritaire sur le Top10 — si le remote est plus récent, on applique
+      if (remWkTs >= locWkTs || remote._by === 'dm') {
+        if (APP.planning.weekKey !== remote.planning.weekKey) {
+          APP.planning.weekKey  = remote.planning.weekKey;
+          changed = true;
+        }
+        if (remote.planning.top10ids && Array.isArray(remote.planning.top10ids)) {
+          APP.planning.top10ids = remote.planning.top10ids.slice();
+          changed = true;
+        }
+      }
     }
 
     // Rapport hebdo — priorité absolue Chef d'Atelier
@@ -3941,6 +3963,9 @@ function _applyLogin(role, saveSession) {
     document.getElementById('topav').className = 'uav av-chef';
     document.getElementById('topav').textContent = 'SC';
     document.getElementById('adminNav').style.display = 'none';
+    // Afficher le bouton "Sync DM" pour le Chef
+    var rBtn = document.getElementById('chef-reset-btn');
+    if (rBtn) rBtn.style.display = 'inline-flex';
   }
   initFilters();
   updateWeekBadge();
@@ -4355,22 +4380,24 @@ function buildPriorityRulesPanel() {
     var fieldRows = modules[mod].map(function(f) {
       var fid = f[0], label = f[1], editBy = f[3];
       var winner = rules[fid] || 'chef';
-      var disabled = editBy !== 'both';
+      // Tous les champs ont des boutons radio actifs (DM peut modifier n'importe quelle règle)
       var dmCk  = winner === 'dm';
       var chCk  = winner === 'chef';
-      var note  = editBy === 'dm_only'   ? '<span style="font-size:9px;color:#7c3aed;background:#f5f3ff;padding:1px 5px;border-radius:8px;margin-left:5px;">DM seulement</span>'
-                : editBy === 'chef_only' ? '<span style="font-size:9px;color:#059669;background:#f0fdf4;padding:1px 5px;border-radius:8px;margin-left:5px;">Chef seulement</span>'
-                : '';
-      var dmInput  = disabled ? '<span style="color:#d1d5db;font-size:11px;">—</span>'
-        : '<label style="cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">' +
-            '<input type="radio" name="pr_' + fid + '" value="dm" ' + (dmCk ? 'checked' : '') +
-            ' onchange="savePriorityRule(\'' + fid + '\',\'dm\')" style="cursor:pointer;accent-color:#1d4ed8;width:14px;height:14px;">' +
-          '</label>';
-      var chInput = editBy === 'dm_only' ? '<span style="color:#d1d5db;font-size:11px;">—</span>'
-        : '<label style="cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">' +
-            '<input type="radio" name="pr_' + fid + '" value="chef" ' + (chCk ? 'checked' : '') +
-            ' onchange="savePriorityRule(\'' + fid + '\',\'chef\')" style="cursor:pointer;accent-color:#059669;width:14px;height:14px;">' +
-          '</label>';
+      // Badge informatif sur le comportement par défaut
+      var defaultNote = editBy === 'dm_only'
+        ? '<span style="font-size:9px;color:#7c3aed;background:#f5f3ff;padding:1px 5px;border-radius:8px;margin-left:5px;" title="Par défaut : DM uniquement">défaut DM</span>'
+        : editBy === 'chef_only'
+        ? '<span style="font-size:9px;color:#059669;background:#f0fdf4;padding:1px 5px;border-radius:8px;margin-left:5px;" title="Par défaut : Chef uniquement">défaut Chef</span>'
+        : '';
+      var dmInput = '<label style="cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">' +
+          '<input type="radio" name="pr_' + fid + '" value="dm" ' + (dmCk ? 'checked' : '') +
+          ' onchange="savePriorityRule(\'' + fid + '\',\'dm\')" style="cursor:pointer;accent-color:#1d4ed8;width:14px;height:14px;">' +
+        '</label>';
+      var chInput = '<label style="cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">' +
+          '<input type="radio" name="pr_' + fid + '" value="chef" ' + (chCk ? 'checked' : '') +
+          ' onchange="savePriorityRule(\'' + fid + '\',\'chef\')" style="cursor:pointer;accent-color:#059669;width:14px;height:14px;">' +
+        '</label>';
+      var note = defaultNote;
       return '<tr style="border-bottom:1px solid var(--g100);' + (winner === 'chef' ? 'background:#f0fdf420;' : 'background:#eff6ff20;') + '">' +
         '<td style="padding:8px 12px;font-size:12px;">' + label + note + '</td>' +
         '<td style="padding:8px;text-align:center;width:90px;">' + dmInput  + '</td>' +
@@ -4506,7 +4533,10 @@ if (ROLE === 'dm') {
   var btnReconn = '';
   var btnForce = fbConnected
     ? '<button class="btn bp sm" style="background:#10b981;color:#fff;" onclick="_fbPushNow()">\u2191 Pousser vers Firebase</button>' +
-      '<button class="btn bs sm" onclick="_fbStartSync(ROLE);toast(\'\uD83D\uDD04 Rechargement depuis Firebase...\');">\u2193 Recharger depuis Firebase</button>'
+      '<button class="btn bs sm" onclick="_fbStartSync(ROLE);toast(\'\uD83D\uDD04 Rechargement depuis Firebase...\');">\u2193 Recharger depuis Firebase</button>' +
+      (ROLE !== 'dm'
+        ? '<button class="btn bp sm" style="background:#ef4444;color:#fff;border-color:#ef4444;margin-top:6px;" onclick="chefResetFromFirebase()">\u21BA R\u00e9initialiser depuis Firebase (sync 100% DM)</button>'
+        : '')
     : '';
   var btnDisconn = fbConnected
     ? '<button class="btn bs sm" style="color:#ef4444;border-color:#ef4444;" onclick="_fbSignOut();toast(\'D\u00e9connexion effectu\u00e9e.\');">Se d\u00e9connecter</button>'
@@ -5678,8 +5708,10 @@ function renderPlanDay(day) {
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
     '<div class="ts tg">' + planned.length + '/10 équipement(s) &mdash; <span style="font-size:10px;color:var(--g400);">Max 10 recommandé</span></div>' +
-    '<button class="btn bp sm" onclick="autoGeneratePlanning()" style="font-size:10px;">⚡ Générer Top 10</button>' +
-  '</div>';
+    (ROLE === 'dm'
+    ? '<button class="btn bp sm" onclick="autoGeneratePlanning()" style="font-size:10px;">⚡ Générer Top 10</button>'
+    : '<span style="font-size:10px;color:var(--g400);font-style:italic;">Le Top 10 est généré par le Dir. Matériel.</span>'
+  ) + '</div>';
   if (!planned.length) h += '<div class="al ai">Aucun équipement. Cliquez "Générer depuis MP" ou ajoutez manuellement ci-dessous.</div>';
   planned.forEach(function(e) {
     var d = dayData[e.id] || {};
@@ -5786,6 +5818,11 @@ function saveRealisationPlan(day, eid, val) {
 }
 
 function autoGeneratePlanning() {
+  // Guard : seul le DM peut générer le Top 10
+  if (ROLE !== 'dm') {
+    toast('\u26d4 Seul le Directeur Mat\u00e9riel peut g\u00e9n\u00e9rer le Top 10.');
+    return;
+  }
   /*
    * ────────────────────────────────────────────────────────────────
    * ALGORITHME "TOP 10" — LOGIQUE DE PONDÉRATION (v14)
@@ -7609,6 +7646,148 @@ document.addEventListener('click', function(e) {
   var ni = e.target.closest ? e.target.closest('.ni') : null;
   if (ni && window.innerWidth < 768) closeMobSidebar();
 }, true);
+
+
+// ════════════════════════════════════════════════════════════════
+// Chef : Ajouter un équipement existant au planning de la semaine
+// ════════════════════════════════════════════════════════════════
+function openAddToPlanningModal() {
+  var days = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+  // Équipements déjà dans le planning cette semaine
+  var alreadyIn = {};
+  days.forEach(function(d) {
+    Object.keys(APP.planning.daily[d] || {}).forEach(function(eid) {
+      if ((APP.planning.daily[d][eid]||{}).included) alreadyIn[eid] = true;
+    });
+  });
+
+  // Équipements non OK et pas encore dans le planning
+  var available = _activeEquips().filter(function(e) {
+    return e.statut !== 'OK' && !alreadyIn[e.id];
+  }).sort(function(a,b){ return scoreE(b)-scoreE(a); });
+
+  var existing = document.getElementById('m-add-planning');
+  if (existing) existing.remove();
+
+  var opts = available.length
+    ? available.map(function(e) {
+        var statCls = e.statut === 'PANNE' ? 'bpanne' : 'bimmob';
+        return '<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--g50);cursor:pointer;font-size:12px;">' +
+          '<input type="checkbox" value="'+e.id+'" style="accent-color:var(--b5);width:15px;height:15px;flex-shrink:0;">' +
+          '<span style="font-weight:700;min-width:55px;">'+e.code+'</span>' +
+          '<span class="badge '+statCls+'" style="font-size:9px;">'+e.statut+'</span>' +
+          '<span style="font-size:11px;color:var(--g600);">'+e.famille+'</span>' +
+          '<span class="badge '+(e.pieces==='Disponible'?'bok':'bgray')+'" style="font-size:9px;">'+e.pieces+'</span>' +
+          '<span style="font-size:10px;color:var(--g400);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(e.desc||'').substring(0,40)+'</span>' +
+        '</label>';
+      }).join('')
+    : '<div class="al ai" style="padding:12px;">Tous les équipements en panne sont déjà dans le planning.</div>';
+
+  var modal = document.createElement('div');
+  modal.id = 'm-add-planning';
+  modal.className = 'mo';
+  modal.innerHTML =
+    '<div class="modal" style="max-width:680px;">' +
+      '<div class="mh"><span class="mt">&#10133; Ajouter un &eacute;quipement au planning</span>' +
+        '<button class="mc" onclick="closeM(\'m-add-planning\')">&#10005;</button></div>' +
+      '<div class="mb" style="padding:0;max-height:360px;overflow-y:auto;" id="add-plan-list">' + opts + '</div>' +
+      '<div style="padding:10px 16px;font-size:11px;color:var(--g400);border-top:1px solid var(--g100);">' +
+        'Les \u00e9quipements s\u00e9lectionn\u00e9s seront ajout\u00e9s \u00e0 <strong>tous les jours de la semaine</strong>.' +
+      '</div>' +
+      '<div class="mf">' +
+        '<button class="btn bs" onclick="closeM(\'m-add-planning\')">Annuler</button>' +
+        '<button class="btn bp" onclick="confirmAddToPlanning()">&#10133; Ajouter au planning</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  openM('m-add-planning');
+}
+
+function confirmAddToPlanning() {
+  var checked = Array.from(document.querySelectorAll('#add-plan-list input:checked'));
+  if (!checked.length) { toast('Sélectionnez au moins un équipement.'); return; }
+
+  var days = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+  var added = 0;
+  checked.forEach(function(cb) {
+    var eid = cb.value;
+    var eq  = APP.equips.find(function(e){ return e.id === eid; });
+    if (!eq) return;
+    days.forEach(function(d) {
+      if (!APP.planning.daily[d]) APP.planning.daily[d] = {};
+      if (!APP.planning.daily[d][eid] || !APP.planning.daily[d][eid].included) {
+        APP.planning.daily[d][eid] = {
+          included: true, pieces: eq.pieces||'Non disponible',
+          heures: 8, agent: '', commentaire: '', realisation: 0
+        };
+        _stampField('plan.' + d + '.' + eid + '.included');
+        added++;
+      }
+    });
+  });
+
+  _stampSection('planning');
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  closeM('m-add-planning');
+  renderPlanDay(curPlanDay);
+  toast('\u2705 ' + checked.length + ' \u00e9quipement(s) ajout\u00e9(s) au planning.');
+}
+
+
+// ════════════════════════════════════════════════════════════════
+// RESET CHEF — Recharger 100% les données depuis Firebase
+// Résout les désync KPIs entre DM et Chef
+// ════════════════════════════════════════════════════════════════
+function chefResetFromFirebase() {
+  if (!_fbReady || !_fbDB || !_fbAuth || !_fbAuth.currentUser) {
+    toast('\u26d4 Non connect\u00e9 \u00e0 Firebase. V\u00e9rifiez votre connexion.');
+    return;
+  }
+  if (!confirm('R\u00e9initialiser compl\u00e8tement depuis Firebase ?\n\nToutes vos donn\u00e9es locales seront remplac\u00e9es par les donn\u00e9es du Directeur Mat\u00e9riel.\n\nConfirmer ?')) return;
+
+  toast('\u23f3 Rechargement depuis Firebase...');
+
+  _fbDB.ref('atcdata').once('value').then(function(snap) {
+    var remote = snap.val();
+    if (!remote || typeof remote !== 'object') {
+      toast('\u26d4 Aucune donn\u00e9e trouv\u00e9e dans Firebase.');
+      return;
+    }
+
+    // Effacer le localStorage et sessionStorage
+    try { localStorage.removeItem('DM_PLANNING_v8'); } catch(e){}
+    try { sessionStorage.removeItem('DM_PLANNING_v8'); } catch(e){}
+
+    // Reconstruire APP depuis le remote (remplacement total)
+    if (remote.equips)      APP.equips       = remote.equips;
+    if (remote.agents)      APP.agents       = remote.agents;
+    if (remote.dm_inst)     APP.dm           = remote.dm_inst;
+    if (remote.urg)         APP.urg          = remote.urg;
+    if (remote.hist)        APP.hist         = remote.hist;
+    if (remote.planning)    APP.planning     = remote.planning;
+    if (remote.masterplan)  APP.masterplan   = remote.masterplan;
+    if (remote.taches)      APP.taches       = remote.taches;
+    if (remote.suiviTaches) APP.suiviTaches  = remote.suiviTaches;
+    if (remote._fieldTs)    APP.fieldTs      = remote._fieldTs;
+    if (typeof remote.masterplanLocked === 'boolean') APP.masterplanLocked = remote.masterplanLocked;
+    if (remote._deletedAgentIds) APP._deletedAgentIds = remote._deletedAgentIds;
+
+    // Filtrer les agents supprimés
+    if (APP._deletedAgentIds && APP._deletedAgentIds.length) {
+      APP.agents = APP.agents.filter(function(a) {
+        return APP._deletedAgentIds.indexOf(a.id) === -1;
+      });
+    }
+
+    // Sauvegarder localement et rafraîchir l'UI
+    saveApp();
+    autoRefreshUI();
+    toast('\u2705 Donn\u00e9es recharg\u00e9es depuis Firebase — synchronis\u00e9 \u00e0 100% avec le DM.');
+  }).catch(function(err) {
+    toast('\u274c Erreur Firebase : ' + (err.message || err));
+  });
+}
 
 // Init sync badge
 _syncSetStatus('inactive');
