@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════
-  DM-PLANNING v15.0 — SOSETER HYDRO — F. SEYE — Directeur Matériel
+  DM-PLANNING v16.1 — SOSETER HYDRO — F. SEYE — Directeur Matériel
   GitHub Pages : https://fseye-dm.github.io/atc-planning/
   Firebase : dm-planning-soseter | Zone : europe-west1
 
@@ -80,7 +80,8 @@
   ✅ Commentaire de certification modules ajouté
   ✅ CSS Responsive Mobile (< 768px) : hamburger sidebar, cartes équipements,
      modales 95vw, boutons tactiles 44px, topbar compacte
-  ✅ Aucune régression détectée — 39/39 fonctions présentes
+  ✅ Audit sync/persistance v16.1 : 20/20 fonctions — stamp+save+firebase complets
+  ✅ Guide d'utilisation mis à jour — adaptatif DM/Chef (7 sections)
 
   Firebase config : apiKey AIzaSyCiu_... | fseye2018@gmail.com (DM) | souleyecisse017@gmail.com (Chef)
 ═══════════════════════════════════════════════════════════════════ -->
@@ -801,7 +802,7 @@ textarea{resize:vertical;min-height:60px}
         <div class="stitle">Ordonnancement &amp; Priorites</div>
         <div class="flex g2">
           <button class="btn bp sm" onclick="autoOrd()">Ordonner Auto</button>
-          <button class="btn bs sm" onclick="saveApp();toast('Ordre sauvegarde.');">Sauvegarder</button>
+          <button class="btn bs sm" onclick="_stampField('ord.criteriaOrder'); saveApp(); if (_fbReady && _fbDB) _fbWriteToCloud(); toast('Ordre sauvegardé.');">Sauvegarder</button>
           <button class="btn bs sm" style="background:#0a1628;color:#fff;border-color:#0a1628;" onclick="openGanttModal()">&#128200; GANTT A4H</button>
         </div>
       </div>
@@ -818,7 +819,10 @@ textarea{resize:vertical;min-height:60px}
           </div>
         </div>
         <div>
-          <div class="stitle" style="font-size:12px;">Equipements &mdash; classes par priorite</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div class="stitle" style="font-size:12px;margin:0;">Équipements — classés par priorité</div>
+            <input id="ord-search" type="text" placeholder="🔍 Rechercher code ou description..." oninput="renderOrdList()" style="font-size:11px;padding:5px 10px;border:1px solid var(--g200);border-radius:6px;width:240px;">
+          </div>
           <div id="ord-list"></div>
         </div>
       </div>
@@ -1058,7 +1062,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v15.0';
+var APP_VERSION = 'v16.1';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -3725,29 +3729,50 @@ if (!APP.fieldTs) APP.fieldTs = {};
 // 'dm'   = DM prioritaire en cas de conflit
 if (!APP.priorityRules) {
   APP.priorityRules = {
-    'equip.statut':    'chef',   // Chef est sur le terrain
-    'equip.priority':  'dm',     // DM décide de l'ordonnancement
-    'equip.pieces':    'chef',   // Chef confirme dispo terrain
-    'equip.desc':      'dm',     // DM pilote les travaux
-    'equip.anomalies': 'chef',   // Chef documente les anomalies
-    'plan.included':   'dm',     // DM construit le planning
-    'plan.agent':      'chef',   // Chef affecte les agents
-    'plan.realisation':'chef',   // Chef saisit l'avancement réel
-    'plan.commentaire':'chef',   // Retour opérationnel Chef
-    'plan.pieces':     'chef',   // Chef confirme les pièces
-    'plan.rptComment': 'chef',   // Rapport terrain du Chef
-    'mp.cell':         'dm',     // Master Planning = DM
-    'dm.text':         'dm',     // Instructions = DM
-    'dm.priority':     'dm',
-    'dm.dest':         'dm',
-    'dm.executed':     'dm',
-    'dm.comment':      'chef',   // Retour Chef sur instruction
-    'agent.actif':     'chef',   // Chef connait la disponibilité terrain
-    'agent.metier':    'dm',
-    'agent.heures':    'dm',
-    'suivi.done':      'chef',   // Chef valide les tâches
-    'suivi.rh':        'chef',
-    'suivi.anomalies': 'chef'
+    // ── Équipements ───────────────────────────────────────────
+    'equip.statut':       'chef',  // Chef terrain → statut réel
+    'equip.priority':     'dm',    // DM pilote l'ordonnancement
+    'equip.pieces':       'chef',  // Chef confirme dispo pièces terrain
+    'equip.desc':         'dm',    // DM rédige la description technique
+    'equip.anomalies':    'chef',  // Chef documente les anomalies
+    'equip.create':       'dm',    // Seul le DM crée un équipement
+    'equip.delete':       'dm',    // Seul le DM supprime un équipement
+    // ── Planning Hebdo ────────────────────────────────────────
+    'plan.included':      'dm',    // DM construit le Top10
+    'plan.agent':         'chef',  // Chef affecte les agents
+    'plan.realisation':   'chef',  // Chef saisit l'avancement réel
+    'plan.commentaire':   'chef',  // Retour terrain du Chef
+    'plan.pieces':        'chef',  // Chef confirme les pièces
+    'plan.rptComment':    'chef',  // Rapport hebdo terrain
+    'plan.generateTop10': 'dm',    // Si conflit simultané, DM gagne
+    'plan.frozen':        'dm',    // Seul le DM peut figer un équipement
+    // ── Master Planning ───────────────────────────────────────
+    'mp.cell':            'dm',    // Master Planning = autorité DM
+    'masterplanLocked':   'dm',    // Verrou exclusif DM
+    // ── Instructions DM ───────────────────────────────────────
+    'dm.text':            'dm',
+    'dm.priority':        'dm',
+    'dm.dest':            'dm',
+    'dm.executed':        'dm',
+    'dm.comment':         'chef',  // Retour Chef sur instruction
+    'dm.deleteInstruction':'dm',   // Seul le DM peut supprimer une instruction
+    // ── Agents / RH ───────────────────────────────────────────
+    'agent.actif':        'chef',  // Chef = disponibilité terrain
+    'agent.metier':       'dm',
+    'agent.heures':       'dm',
+    'agent.deleted':      'dm',    // Seul le DM supprime définitivement
+    // ── Suivi des Tâches ──────────────────────────────────────
+    'suivi.done':         'chef',  // Chef valide les tâches terrain
+    'suivi.rh':           'chef',
+    'suivi.anomalies':    'chef',
+    'suivi.deleteTask':   'chef',  // Chef peut supprimer une tâche terrain
+    'suivi.addTask':      'chef',  // Chef peut ajouter une tâche
+    // ── Historique ────────────────────────────────────────────
+    'hist.addEntry':      'dm',    // DM prioritaire sur les entrées d'historique
+    // ── Ordonnancement ────────────────────────────────────────
+    'ord.criteriaOrder':  'dm',    // DM définit l'ordre des critères
+    'ord.priority':       'dm',
+    'ord.pieces':         'chef'
   };
 }
 
@@ -4025,223 +4050,214 @@ function showPage(pg) {
 }
 
 function buildGuidePage() {
+  var isDM = (ROLE === 'dm');
   var S = {
-    card: 'background:#fff;border:1px solid var(--g200);border-radius:8px;padding:14px 16px;',
-    starCard: 'background:#fef9c3;border:2px solid #f59e0b;border-radius:8px;padding:14px 16px;',
-    hdr2: 'font-family:"Barlow Condensed",sans-serif;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--b5);margin:0 0 8px;',
-    hdr3: 'font-size:12px;font-weight:700;color:var(--b9);margin:8px 0 5px;',
-    li: 'font-size:11.5px;line-height:1.8;color:var(--g600);',
-    badge: 'display:inline-flex;align-items:center;gap:5px;background:#fef9c3;border:1.5px solid #f59e0b;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;color:#92400e;margin-bottom:8px;',
-    infoBox: 'background:var(--b1);border-left:4px solid var(--b5);padding:10px 14px;border-radius:0 6px 6px 0;font-size:11.5px;color:var(--b6);line-height:1.7;margin:8px 0;',
-    warnBox: 'background:#fef9c3;border-left:4px solid #f59e0b;padding:10px 14px;border-radius:0 6px 6px 0;font-size:11.5px;color:#92400e;line-height:1.7;margin:8px 0;',
-    okBox: 'background:#d1fae5;border-left:4px solid #10b981;padding:10px 14px;border-radius:0 6px 6px 0;font-size:11.5px;color:#065f46;line-height:1.7;margin:8px 0;',
-    step: 'display:flex;align-items:flex-start;gap:9px;margin:5px 0;',
-    stepNum: 'flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--b5);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;',
-    stepTxt: 'font-size:11.5px;color:var(--g600);line-height:1.6;padding-top:2px;',
-    tbl: 'width:100%;border-collapse:collapse;font-size:11.5px;margin:6px 0;',
-    th: 'background:var(--b9);color:#fff;padding:6px 9px;text-align:left;font-size:11px;font-weight:700;',
-    thC: 'background:var(--b9);color:#fff;padding:6px 9px;text-align:center;font-size:11px;font-weight:700;',
-    td: 'padding:5px 9px;border-bottom:1px solid var(--g100);color:var(--g600);vertical-align:top;',
-    tdAlt: 'padding:5px 9px;border-bottom:1px solid var(--g100);color:var(--g600);background:var(--g50);vertical-align:top;',
+    card:     'background:#fff;border:1px solid var(--g200);border-radius:8px;padding:14px 16px;margin-bottom:12px;',
+    blueCard: 'background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:14px 16px;margin-bottom:12px;',
+    greenCard:'background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px 16px;margin-bottom:12px;',
+    warnCard: 'background:#fef9c3;border:1px solid #f59e0b;border-radius:8px;padding:14px 16px;margin-bottom:12px;',
+    h2:       'font-family:"Barlow Condensed",sans-serif;font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--b5);margin:0 0 10px;border-bottom:2px solid var(--b1);padding-bottom:4px;',
+    h3:       'font-size:12px;font-weight:700;color:var(--b9);margin:10px 0 5px;',
+    li:       'font-size:12px;line-height:1.9;color:var(--g600);',
+    step:     'display:flex;align-items:flex-start;gap:9px;margin:5px 0;',
+    num:      'flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--b5);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;',
+    badge:    'display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;',
+    tag:      function(t,c){return '<span style="background:'+c+';color:#fff;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;">'+t+'</span>';}
   };
-  function step(n,t,d){return'<div style="'+S.step+'"><div style="'+S.stepNum+'">'+n+'</div><div style="'+S.stepTxt+'"><b>'+t+'</b><br>'+d+'</div></div>';}
-  function li(t){return'<li style="'+S.li+'">'+t+'</li>';}
-  function card(title,color,icon,content){
-    var bg = color || 'var(--b5)';
-    return '<div style="'+S.card+'">'
-      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
-      +'<span style="font-size:18px;">'+icon+'</span>'
-      +'<span style="'+S.hdr2+' margin:0;color:'+bg+';">'+title+'</span>'
-      +'</div>'+content+'</div>';
-  }
-  function starCard(title,icon,content){
-    return '<div style="'+S.starCard+'">'
-      +'<div style="'+S.badge+'">&#9733; SECTION ESSENTIELLE \u2014 Chef d\'Atelier</div>'
-      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
-      +'<span style="font-size:18px;">'+icon+'</span>'
-      +'<span style="'+S.hdr2+' margin:0;color:#b45309;">'+title+'</span>'
-      +'</div>'+content+'</div>';
+  function li(t){return '<li style="'+S.li+'">'+t+'</li>';}
+  function step(n,t){return '<div style="'+S.step+'"><div style="'+S.num+'">'+n+'</div><div style="font-size:12px;color:var(--g600);line-height:1.7;">'+t+'</div></div>';}
+  function rule(ch, dm, label){
+    return '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:11px;">' +
+      '<span style="min-width:120px;color:var(--g600);">'+label+'</span>' +
+      '<span style="background:'+(ch==='chef'?'#f97316':'#1d4ed8')+';color:#fff;padding:1px 7px;border-radius:8px;font-size:10px;font-weight:700;">'+(ch==='chef'?'Chef prioritaire':'DM prioritaire')+'</span>' +
+    '</div>';
   }
 
-  var cycleHtml = '<div style="display:flex;gap:3px;margin:12px 0 16px;border-radius:8px;overflow:hidden;">'
-    +'<div style="flex:1;background:linear-gradient(135deg,#1d4ed8,#1a3a6e);color:#fff;padding:12px 10px;">'
-    +'<div style="font-size:18px;margin-bottom:4px;">&#128197;</div>'
-    +'<div style="font-weight:700;font-size:11px;text-transform:uppercase;">Lundi Matin</div>'
-    +'<div style="font-size:10.5px;margin-top:4px;opacity:.9;">G\u00E9n\u00E9rer Top 10<br>Affecter techniciens<br>Cr\u00E9er t\u00E2ches A,B,C\u2026</div></div>'
-    +'<div style="width:14px;background:#1a3a6e;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;">&#9658;</div>'
-    +'<div style="flex:1;background:linear-gradient(135deg,#f97316,#d97706);color:#fff;padding:12px 10px;">'
-    +'<div style="font-size:18px;margin-bottom:4px;">&#128268;</div>'
-    +'<div style="font-weight:700;font-size:11px;text-transform:uppercase;">Mardi\u2013Jeudi</div>'
-    +'<div style="font-size:10.5px;margin-top:4px;opacity:.9;">Valider t\u00E2ches<br>MAJ pi\u00E8ces<br>Saisir % r\u00E9alisation</div></div>'
-    +'<div style="width:14px;background:#d97706;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;">&#9658;</div>'
-    +'<div style="flex:1;background:linear-gradient(135deg,#10b981,#059669);color:#fff;padding:12px 10px;">'
-    +'<div style="font-size:18px;margin-bottom:4px;">&#9989;</div>'
-    +'<div style="font-weight:700;font-size:11px;text-transform:uppercase;">Vendredi Matin</div>'
-    +'<div style="font-size:10.5px;margin-top:4px;opacity:.9;">Finaliser t\u00E2ches<br>Bilan Vendredi<br>Taux r\u00E9alisation finals</div></div>'
-    +'<div style="width:14px;background:#059669;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;">&#9658;</div>'
-    +'<div style="flex:1;background:linear-gradient(135deg,#7c3aed,#5b21b6);color:#fff;padding:12px 10px;border-radius:0 8px 8px 0;">'
-    +'<div style="font-size:18px;margin-bottom:4px;">&#128196;</div>'
-    +'<div style="font-weight:700;font-size:11px;text-transform:uppercase;">Vendredi APM</div>'
-    +'<div style="font-size:10.5px;margin-top:4px;opacity:.9;">Rapport Hebdo<br>Commenter + Imprimer<br>Signer 2 exemplaires</div></div>'
-    +'</div>';
+  // ── En-tête personnalisé selon le profil ────────────────────
+  var profileBanner = isDM
+    ? '<div style="background:linear-gradient(135deg,#0a1628,#1d4ed8);border-radius:10px;padding:16px 20px;margin-bottom:16px;color:#fff;display:flex;align-items:center;gap:14px;">' +
+        '<span style="font-size:32px;">👔</span>' +
+        '<div><div style="font-family:\'Barlow Condensed\',sans-serif;font-size:18px;font-weight:800;">Guide — Directeur Matériel</div>' +
+        '<div style="font-size:12px;opacity:.8;margin-top:2px;">DM-PLANNING v' + APP_VERSION + ' · SOSETER HYDRO · Accès complet à tous les modules</div></div>' +
+      '</div>'
+    : '<div style="background:linear-gradient(135deg,#065f46,#10b981);border-radius:10px;padding:16px 20px;margin-bottom:16px;color:#fff;display:flex;align-items:center;gap:14px;">' +
+        '<span style="font-size:32px;">🔧</span>' +
+        '<div><div style="font-family:\'Barlow Condensed\',sans-serif;font-size:18px;font-weight:800;">Guide — Chef d\'Atelier</div>' +
+        '<div style="font-size:12px;opacity:.8;margin-top:2px;">DM-PLANNING v' + APP_VERSION + ' · SOSETER HYDRO · Saisie terrain & validation tâches</div></div>' +
+      '</div>';
 
-  // ── Ordonnancement ★ ────────────────────────────────────
-  var ordo = starCard('5. Ordonnancement & Priorit\u00E9s', '&#127919;',
-    '<p style="font-size:11.5px;color:var(--g600);margin:0 0 8px;">Le c\u0153ur strat\u00E9gique. D\u00E9termine l\'ordre de traitement et alimente le Top 10.</p>'
-    +'<div style="'+S.hdr3+'">3 crit\u00E8res (glisser-d\u00E9poser pour r\u00E9ordonner)</div>'
-    +'<table style="'+S.tbl+'"><thead><tr><th style="'+S.th+'">Crit\u00E8re</th><th style="'+S.th+'">Valeurs</th><th style="'+S.thC+'">Poids</th></tr></thead><tbody>'
-    +'<tr><td style="'+S.td+'"><b>1. Pi\u00E8ces dispo.</b></td><td style="'+S.td+'">Disponible / Partiel / Non dispo.</td><td style="'+S.td+';text-align:center;">W=30 (1er rang)</td></tr>'
-    +'<tr><td style="'+S.tdAlt+'"><b>2. Disponibilit\u00E9 RH</b></td><td style="'+S.tdAlt+'">Agent affect\u00E9 / Aucun agent</td><td style="'+S.tdAlt+';text-align:center;">W=20 (2e rang)</td></tr>'
-    +'<tr><td style="'+S.td+'"><b>3. Priorit\u00E9 Op\u00E9r.</b></td><td style="'+S.td+'">Niveaux 1 (critique) \u00E0 5 (diff\u00E9r\u00E9)</td><td style="'+S.td+';text-align:center;">W=10 (3e rang)</td></tr>'
-    +'</tbody></table>'
-    +step(1,'Acc\u00E9der','Menu \u2192 "Ordonnancement". Liste PANNE tri\u00E9e par score d\u00E9croissant.')
-    +step(2,'R\u00E9organiser','Glissez-d\u00E9posez les crit\u00E8res. Classement mis \u00E0 jour instantan\u00E9ment.')
-    +step(3,'Ajuster','Modifiez niveau priorit\u00E9 (1\u20135) et disponibilit\u00E9 pi\u00E8ces pour chaque \u00E9quipement.')
-    +step(4,'Ordonner Auto','Cliquez "Ordonner Auto" \u2192 recalcule tous les scores.')
-    +step(5,'Sauvegarder','Cliquez "Sauvegarder" \u2014 donn\u00E9es utilis\u00E9es par la g\u00E9n\u00E9ration du Top 10.')
-    +'<div style="'+S.okBox+'">\u2713 Bonne pratique : R\u00E9organisez l\'ordonnancement le lundi matin AVANT de g\u00E9n\u00E9rer le Top 10. Mettez "Pi\u00E8ces disponibles" en 1er rang pour \u00E9viter les blocages.</div>'
-  );
+  // ── Section 1 : Connexion ────────────────────────────────────
+  var secConnexion = '<div style="' + S.blueCard + '">' +
+    '<div style="' + S.h2 + '">☁ 1. Connexion &amp; Synchronisation Firebase</div>' +
+    step(1, '<strong>Ouvrez</strong> <code>https://fseye-dm.github.io/atc-planning/</code> dans Edge ou Chrome.') +
+    step(2, '<strong>Cliquez "Se connecter avec Google"</strong> → sélectionnez votre compte Gmail.') +
+    step(3, 'L\'application détecte automatiquement votre profil : <strong>' + (isDM ? 'Directeur Matériel' : 'Chef d\'Atelier') + '</strong>.') +
+    step(4, 'Le badge <strong>☁ Cloud actif</strong> (vert) en haut à droite confirme la synchronisation temps réel.') +
+    '<div style="background:#dbeafe;border-radius:6px;padding:9px 12px;font-size:11px;color:#1e3a8a;margin-top:10px;">' +
+      '<strong>✅ Synchronisation automatique :</strong> chaque modification est envoyée vers Firebase en &lt; 1 seconde. ' +
+      'L\'autre profil reçoit la mise à jour instantanément, <strong>sans rechargement de page (F5)</strong>.<br>' +
+      '<strong>🔌 Hors-ligne :</strong> les données sont sauvegardées localement et synchronisées dès le retour de la connexion.' +
+    '</div>' +
+    (isDM
+      ? '<div style="margin-top:10px;font-size:11px;color:var(--g600);">En cas de problème : <strong>Gestion Base → 🔧 Diagnostic Firebase</strong> pour tester la liaison en 7 étapes.</div>'
+      : '') +
+  '</div>';
 
-  // ── Planning Hebdo ★ ────────────────────────────────────
-  var planning = starCard('6. Planning Hebdomadaire \u2014 R\u00E8gle Top 10', '&#128197;',
-    '<p style="font-size:11.5px;color:var(--g600);margin:0 0 8px;">Vue op\u00E9rationnelle Lun\u2013Ven. Le Top 10 garantit la capacit\u00E9 r\u00E9elle de l\'atelier.</p>'
-    +'<div style="'+S.hdr3+'">Score de g\u00E9n\u00E9ration du Top 10</div>'
-    +'<table style="'+S.tbl+'"><thead><tr><th style="'+S.th+'">Crit\u00E8re</th><th style="'+S.thC+'">Points</th></tr></thead><tbody>'
-    +'<tr><td style="'+S.td+'">Master Plan \u2014 Planifi\u00E9 ce mois</td><td style="'+S.td+';text-align:center;font-weight:700;color:var(--b5);">+40 pts</td></tr>'
-    +'<tr><td style="'+S.tdAlt+'">Travaux en cours (25\u201375%)</td><td style="'+S.tdAlt+';text-align:center;font-weight:700;color:var(--b5);">+30 pts</td></tr>'
-    +'<tr><td style="'+S.td+'">Urgence d\u00E9clar\u00E9e</td><td style="'+S.td+';text-align:center;font-weight:700;color:var(--b5);">+25 pts</td></tr>'
-    +'<tr><td style="'+S.tdAlt+'">Master Plan \u2014 P\u00E9riode active</td><td style="'+S.tdAlt+';text-align:center;font-weight:700;color:var(--b5);">+20 pts</td></tr>'
-    +'<tr><td style="'+S.td+'">Instruction DM cibl\u00E9e</td><td style="'+S.td+';text-align:center;font-weight:700;color:var(--b5);">+15 pts/instr.</td></tr>'
-    +'<tr><td style="'+S.tdAlt+'">Score ordonnancement</td><td style="'+S.tdAlt+';text-align:center;font-weight:700;color:var(--b5);">+variable</td></tr>'
-    +'<tr><td style="'+S.td+'">&#128274; \u00C9quipements fig\u00E9s</td><td style="'+S.td+';text-align:center;font-weight:700;color:#7c3aed;">Toujours inclus</td></tr>'
-    +'</tbody></table>'
-    +'<div style="'+S.hdr3+'">Actions manuelles</div>'
-    +'<ul style="padding-left:16px;margin:0;">'+li('Ajouter : boutons "+ Code" en bas')+li('Retirer : bouton "Retirer" \u00E0 droite')+li('Figer &#128274; : toujours inclus dans prochaines g\u00E9n\u00E9rations')+li('Technicien : d\u00E9rouler carte \u2192 liste d\u00E9roulante')+li('% r\u00E9alisation : 25 / 50 / 75 / 100% \u2014 \u00E0 100% \u2192 statut passe \u00E0 OK')+'</ul>'
-    +'<div style="'+S.infoBox+'"><b>Bilan Vendredi :</b> Saisir le taux final + commentaire. Les \u00E9quipements \u00E0 100% passent \u00E0 OK automatiquement.</div>'
-  );
+  // ── Section 2 : Modules accessibles ─────────────────────────
+  var modsDM = [
+    ['Dashboard','📊','Indicateurs KPI globaux, taux de disponibilité, équipements en panne.'],
+    ['Ordonnancement','🔢','Classement des pannes par score. Barre de recherche. Ajuster Priorité + Pièces. Générer GANTT.'],
+    ['Master Planning','📅','Planification 6 mois. Clic cellule P/✓. Verrouillage du plan.'],
+    ['Planning Hebdo','📋','Générer le Top 10. Onglets Lundi→Dimanche/Bilan.'],
+    ['Équipements','🚛','Tableau complet. Changer statut. Éditer description. Ajouter/supprimer.'],
+    ['Personnel / RH','👷','Effectifs, heures, heures supp. Ajouter/supprimer agents.'],
+    ['Instructions DM','📢','Publier des instructions ciblées. Valider. Déverrouiller.'],
+    ['Historique','📖','Tous les événements triés par date (décroissant).'],
+    ['Suivi des Tâches','✅','Tâches par équipement planifié. Sélectionner type. Affecter RH. Valider. Supprimer.'],
+    ['Rapport Hebdo','📄','Rapport A4 avec Top10, tâches, RH, Instructions. Imprimer.'],
+    ['Gestion Base','⚙️','Config Firebase, logo, types de tâches, familles/métiers, Diagnostic, Pousser/Recharger.'],
+    ['GANTT Stratégique','📈','Rapport A4H depuis Ordonnancement → GANTT A4H. Présélection Top10+10 suivants.'],
+  ];
+  var modsChef = [
+    ['Dashboard','📊','Vue globale du parc en lecture seule.'],
+    ['Ordonnancement','🔢','Consulter le classement des pannes. Mettre à jour Pièces.'],
+    ['Planning Hebdo','📋','Consulter le Top 10 de la semaine. Saisir % réalisation et commentaires.'],
+    ['Équipements','🚛','Consulter les statuts. Signaler un changement de statut.'],
+    ['Personnel / RH','👷','Cocher/décocher agents actifs. Saisir heures supp. Affecter RH aux tâches.'],
+    ['Instructions DM','📢','Lire les instructions. Ajouter un commentaire de retour. Marquer exécuté.'],
+    ['Suivi des Tâches','✅','Créer tâches pour les équipements planifiés. Valider. Affecter agents.'],
+    ['Rapport Hebdo','📄','Saisir le commentaire Chef. Consulter le rapport de la semaine.'],
+    ['Historique','📖','Consulter les événements en lecture (trié récent → ancien).'],
+  ];
+  var mods = isDM ? modsDM : modsChef;
 
-  // ── Suivi Tâches ★ ──────────────────────────────────────
-  var suivi = starCard('7. Suivi Hi\u00E9rarchique des T\u00E2ches', '&#128203;',
-    '<p style="font-size:11.5px;color:var(--g600);margin:0 0 8px;">Source principale des donn\u00E9es du rapport. Chaque \u00E9quipement a ses t\u00E2ches A, B, C\u2026 \u00E0 valider.</p>'
-    +step(1,'D\u00E9velopper l\'\u00E9quipement','Cliquez sur l\'en-t\u00EAte de la carte pour afficher/masquer les t\u00E2ches.')
-    +step(2,'Ajouter une t\u00E2che','Champ en bas de carte : nom court + description. Clic "+ Ajouter".')
-    +step(3,'Affecter les RH','Clic bouton RH de la t\u00E2che \u2192 s\u00E9lecteur multi-agents (actifs uniquement).')
-    +step(4,'Valider','Cochez la case \u25a0 \u00E0 droite. La ligne se grise, le % se met \u00E0 jour.')
-    +step(5,'Compl\u00E9tion 100%','Toutes t\u00E2ches valid\u00E9es \u2192 statut de l\'\u00E9quipement passe \u00E0 OK.')
-    +'<div style="'+S.warnBox+'">\u26A0 Cr\u00E9ez les t\u00E2ches le lundi matin. Validez-les au fur et \u00E0 mesure \u2014 ne laissez pas la validation au vendredi.</div>'
-  );
+  var modsHtml = mods.map(function(m) {
+    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--g50);">' +
+      '<span style="font-size:16px;flex-shrink:0;">' + m[1] + '</span>' +
+      '<div><strong style="font-size:12px;">' + m[0] + '</strong>' +
+      '<div style="font-size:11px;color:var(--g600);">' + m[2] + '</div></div>' +
+    '</div>';
+  }).join('');
 
-  // ── Rapport ★ ───────────────────────────────────────────
-  var rapport = starCard('8. Rapport Hebdomadaire PDF', '&#128196;',
-    '<p style="font-size:11.5px;color:var(--g600);margin:0 0 8px;">Document A4 auto-g\u00E9n\u00E9r\u00E9, pr\u00EAt \u00E0 imprimer et signer. Filtr\u00E9 sur les 10 \u00E9quipements planifi\u00E9s.</p>'
-    +'<table style="'+S.tbl+'"><thead><tr><th style="'+S.th+'">Section</th><th style="'+S.th+'">Contenu</th></tr></thead><tbody>'
-    +'<tr><td style="'+S.td+'"><b>4 KPIs</b></td><td style="'+S.td+'">Planifi\u00E9s \u00B7 Taux r\u00E9alisation \u00B7 T\u00E2ches valid\u00E9es \u00B7 Disponibilit\u00E9 parc</td></tr>'
-    +'<tr><td style="'+S.tdAlt+'"><b>Top 10</b></td><td style="'+S.tdAlt+'">Code \u00B7 Famille \u00B7 Description \u00B7 Progression \u00B7 Commentaire</td></tr>'
-    +'<tr><td style="'+S.td+'"><b>RH / M\u00E9tiers</b></td><td style="'+S.td+'">Effectif actif + capacit\u00E9 hebdo par m\u00E9tier</td></tr>'
-    +'<tr><td style="'+S.tdAlt+'"><b>Instructions DM</b></td><td style="'+S.tdAlt+'">6 derni\u00E8res instructions + \u00E9tat ex\u00E9cution</td></tr>'
-    +'<tr><td style="'+S.td+'"><b>Signatures</b></td><td style="'+S.td+'">Zone Chef d\'Atelier + Dir. Mat\u00E9riel</td></tr>'
-    +'</tbody></table>'
-    +step(1,'Acc\u00E9der','Menu \u2192 "Rapport Hebdo". G\u00E9n\u00E9ration automatique.')
-    +step(2,'Commenter','Zone "Commentaire Chef" \u2192 saisir observations semaine.')
-    +step(3,'Imprimer / PDF','Clic "Imprimer / PDF" \u2192 Ctrl+P \u2192 "Enregistrer en PDF".')
-    +'<div style="'+S.infoBox+'"><b>Param\u00E8tres A4 :</b> Marges 8mm \u00B7 \u00C9chelle 100% \u00B7 Activer "Couleurs d\'arri\u00E8re-plan"</div>'
-  );
+  var secModules = '<div style="' + S.card + '">' +
+    '<div style="' + S.h2 + '">📦 2. Modules ' + (isDM ? 'Directeur Matériel (accès complet)' : 'Chef d\'Atelier') + '</div>' +
+    modsHtml +
+  '</div>';
 
-  // ── Modules secondaires ─────────────────────────────────
-  var dashboard = card('3. Dashboard \u2014 KPIs', '#1d4ed8', '&#128202;',
-    '<table style="'+S.tbl+'"><thead><tr><th style="'+S.th+'">KPI</th><th style="'+S.th+'">Seuils</th></tr></thead><tbody>'
-    +'<tr><td style="'+S.td+'">Disponibilit\u00E9 Parc</td><td style="'+S.td+'">&#128994; \u226560% \u00B7 &#128992; 40\u201359% \u00B7 &#128308; &lt;40%</td></tr>'
-    +'<tr><td style="'+S.tdAlt+'">Taux R\u00E9alisation</td><td style="'+S.tdAlt+'">&#128994; \u226575% \u00B7 &#128992; 50\u201374% \u00B7 &#128308; &lt;50%</td></tr>'
-    +'<tr><td style="'+S.td+'">Retards MP</td><td style="'+S.td+'">&#128994; 0 \u00B7 &#128992; 1\u20133 \u00B7 &#128308; &gt;3</td></tr>'
-    +'</tbody></table>'
-  );
+  // ── Section 3 : Flux de travail hebdomadaire ─────────────────
+  var fluxDM =
+    step(1,'<strong>Lundi matin :</strong> Ouvrez <strong>Ordonnancement</strong> → ajustez priorités et pièces disponibles.') +
+    step(2,'<strong>Ordonnancement → GANTT A4H</strong> pour préparer le CODIR : rapport visuel 6 mois avec KPIs.') +
+    step(3,'<strong>Planning Hebdo → ⚡ Générer Top 10</strong> : les équipements prioritaires sont sélectionnés automatiquement.') +
+    step(4,'<strong>Master Planning</strong> : cochez "plan" sur les équipements du mois courant. Verrouillez quand validé.') +
+    step(5,'<strong>Instructions DM</strong> : publiez des instructions ciblées (par code équipement).') +
+    step(6,'<strong>En semaine</strong> : consultez les retours Chef en temps réel dans Suivi des Tâches et Instructions DM.') +
+    step(7,'<strong>Vendredi</strong> : générez le <strong>Rapport Hebdo A4</strong> (Planning → Rapport Hebdo → Imprimer).') +
+    step(8,'<strong>Gestion Base</strong> : cliquez "↑ Pousser vers Firebase" si vous suspectez un désync. Diagnostic si erreur.');
 
-  var masterplan = card('4. Master Planning', '#1d4ed8', '&#128466;',
-    '<ul style="padding-left:16px;margin:0;">'+li('Vue 6 mois glissants \u2014 clic cellule : Vide \u2192 P \u2192 \u2713')+li('<b>P</b> = planifi\u00E9 \u2014 <b>\u2713</b> = termin\u00E9')+li('Alerte RETARD = 5 conditions simultan\u00E9es')+li('DM peut verrouiller &#128274; la grille')+'</ul>'
-  );
+  var fluxChef =
+    step(1,'<strong>Lundi :</strong> Consultez <strong>Planning Hebdo</strong> pour voir le Top 10 de la semaine.') +
+    step(2,'<strong>Personnel / RH</strong> : cochez les agents présents (actif). Mettez à jour les heures supp.') +
+    step(3,'<strong>Instructions DM</strong> : lisez les instructions et ajoutez votre commentaire de retour.') +
+    step(4,'<strong>Suivi des Tâches</strong> : pour chaque équipement planifié, créez les tâches (type + description).') +
+    step(5,'<strong>Terrain</strong> : affectez les agents (bouton 👷) et validez les tâches terminées (✅).') +
+    step(6,'<strong>Planning Hebdo</strong> : saisissez le % de réalisation et vos commentaires pour chaque équipement.') +
+    step(7,'<strong>Rapport Hebdo</strong> : ajoutez le commentaire général de la semaine avant impression par le DM.');
 
-  var droits = card('2. Droits & Profils', '#7c3aed', '&#128084;',
-    '<table style="'+S.tbl+'"><thead><tr><th style="'+S.th+'">Fonctionnalit\u00E9</th><th style="'+S.thC+'">Chef</th><th style="'+S.thC+'">DM</th></tr></thead><tbody>'
-    +'<tr><td style="'+S.td+'">Planning Hebdo</td><td style="'+S.td+';text-align:center;">\u2713</td><td style="'+S.td+';text-align:center;">\u2713</td></tr>'
-    +'<tr><td style="'+S.tdAlt+'">Ordonnancement</td><td style="'+S.tdAlt+';text-align:center;">\u2713</td><td style="'+S.tdAlt+';text-align:center;">\u2713</td></tr>'
-    +'<tr><td style="'+S.td+'">Import/Export Excel</td><td style="'+S.td+';text-align:center;">\u2717</td><td style="'+S.td+';text-align:center;">\u2713</td></tr>'
-    +'<tr><td style="'+S.tdAlt+'">Instructions DM (\u00E9dition)</td><td style="'+S.tdAlt+';text-align:center;">Lecture</td><td style="'+S.tdAlt+';text-align:center;">\u2713</td></tr>'
-    +'<tr><td style="'+S.td+'">Gestion Base / Sync</td><td style="'+S.td+';text-align:center;">\u2717</td><td style="'+S.td+';text-align:center;">\u2713</td></tr>'
-    +'</tbody></table>'
-    +'<div style="font-size:11px;color:var(--g400);margin-top:6px;">MDP: Chef=<b>CHEF2026</b> \u00B7 DM=<b>DM2026</b></div>'
-  );
+  var secFlux = '<div style="' + S.greenCard + '">' +
+    '<div style="' + S.h2 + '">🔄 3. Flux de Travail Hebdomadaire' + (isDM ? ' — DM' : ' — Chef') + '</div>' +
+    (isDM ? fluxDM : fluxChef) +
+  '</div>';
 
-  var excel = card('12. Import/Export Excel', '#10b981', '&#128452;',
-    '<ul style="padding-left:16px;margin:0;">'+li('Export : 7 feuilles (Equipements, Agents, Planning, Master, Suivi, Historique, <b>M\u00E9tiers</b>)')+li('Import : Gestion Base \u2192 Choisir fichier \u2192 Aper\u00E7u \u2192 Confirmer')+li('Donn\u00E9es pr\u00E9serv\u00E9es : statuts, r\u00E9alisations, t\u00E2ches, historique')+'</ul>'
-  );
+  // ── Section 4 : Règles de priorité (Smart Merge) ─────────────
+  var secPriorites = '<div style="' + S.card + '">' +
+    '<div style="' + S.h2 + '">⚖️ 4. Règles de Priorité Smart Merge</div>' +
+    '<div style="font-size:11px;color:var(--g600);margin-bottom:8px;">En cas de modification simultanée, le Smart Merge applique automatiquement ces règles :</div>' +
+    rule('chef','dm','Statut équipement') +
+    rule('chef','dm','Pièces disponibles') +
+    rule('dm','chef','Description panne') +
+    rule('dm','chef','Ordonnancement/Prio') +
+    rule('chef','dm','% Réalisation') +
+    rule('chef','dm','Commentaire terrain') +
+    rule('chef','dm','Validation tâches') +
+    rule('chef','dm','RH affecté') +
+    rule('dm','chef','Master Planning') +
+    rule('dm','chef','Instructions DM') +
+    rule('dm','chef','Agents (créer/suppr)') +
+    '<div style="margin-top:10px;font-size:11px;background:#f0fdf4;border-radius:6px;padding:8px 12px;color:#065f46;">' +
+      '<strong>💡 Principe :</strong> Le Chef est prioritaire sur tout ce qui concerne le terrain (réalisation, agents disponibles, pièces). ' +
+      'Le DM est prioritaire sur la planification et l\'organisation.' +
+    '</div>' +
+  '</div>';
 
-  var sync = card('13. Synchronisation R\u00E9seau', '#7c3aed', '&#128260;',
-    '<ul style="padding-left:16px;margin:0;">'+li('DM et Chef se connectent avec leur <b>compte Google</b>')+li('Donn\u00E9es centralis\u00E9es dans <b>Firebase Cloud</b> — accessibles partout')+li('MAJ en temps r\u00E9el (&lt; 1 seconde) sans rechargement')+li('Priorit\u00E9s DM/Chef appliqu\u00E9es automatiquement')+li('En cas de besoin : boutons <b>"Pousser"</b> et <b>"Recharger"</b> dans Gestion Base')+'</ul>'
-  );
+  // ── Section 5 : Top 10 & Scoring ───────────────────────────
+  var secScoring = '<div style="' + S.card + '">' +
+    '<div style="' + S.h2 + '">⚡ 5. Algorithme de Génération Top 10</div>' +
+    '<div style="font-size:11px;color:var(--g600);margin-bottom:8px;">Le bouton "⚡ Générer Top 10" sélectionne automatiquement les 10 équipements prioritaires :</div>' +
+    '<table style="width:100%;border-collapse:collapse;font-size:11px;">' +
+      '<tr style="background:var(--b9);color:#fff;"><th style="padding:5px 8px;text-align:left;">Critère</th><th style="padding:5px 8px;text-align:center;">Points</th></tr>' +
+      '<tr style="background:var(--g50);"><td style="padding:4px 8px;">Master Planning planifié ce mois</td><td style="padding:4px 8px;text-align:center;font-weight:700;color:var(--b5);">+100</td></tr>' +
+      '<tr><td style="padding:4px 8px;">Pièces Disponible</td><td style="padding:4px 8px;text-align:center;font-weight:700;color:var(--grn);">+50</td></tr>' +
+      '<tr style="background:var(--g50);"><td style="padding:4px 8px;">Pièces Partiellement disponible</td><td style="padding:4px 8px;text-align:center;font-weight:700;color:var(--acc);">+30</td></tr>' +
+      '<tr><td style="padding:4px 8px;">Priorité opérationnelle (1→5)</td><td style="padding:4px 8px;text-align:center;font-weight:700;">+32 → 0</td></tr>' +
+      '<tr style="background:var(--g50);"><td style="padding:4px 8px;">Travaux en cours (25–99%)</td><td style="padding:4px 8px;text-align:center;font-weight:700;color:var(--orn);">+20</td></tr>' +
+      '<tr><td style="padding:4px 8px;">Instruction DM active ciblée</td><td style="padding:4px 8px;text-align:center;font-weight:700;">+15/instr.</td></tr>' +
+    '</table>' +
+    '<div style="margin-top:8px;font-size:11px;color:var(--g600);">' +
+      '<strong>Règles fixes :</strong> Équipements <em>figés</em> (frozen) → toujours dans le Top 10. Équipements avec réalisation &gt;0% → garantis prioritaires.' +
+    '</div>' +
+  '</div>';
 
-  return '<div style="max-width:860px;padding:6px 0;">'
-    // Banner
-    +'<div style="background:var(--b9);border-radius:8px;padding:14px 18px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;">'
-    +'<div><div style="font-family:\'Barlow Condensed\',sans-serif;font-size:20px;font-weight:800;color:#fff;letter-spacing:1px;">DM-PLANNING v8 \u2014 Guide d\'Utilisation</div>'
-    +'<div style="font-size:11px;color:#93c5fd;margin-top:2px;">Direction Mat\u00E9riel Planning \u2014 SOSETER HYDRO</div></div>'
-    +'<div style="font-size:10px;font-style:italic;color:#93c5fd;text-align:right;">Cr\u00E9\u00E9 par F.SEYE<br>Asset Manager</div>'
-    +'</div>'
-    // Essential warning
-    +'<div style="'+S.warnBox+' margin-bottom:14px;">&#9733; <b>Sections essentielles Chef d\'Atelier</b> (fond jaune) : Ordonnancement \u00B7 Planning Hebdo \u00B7 Suivi des T\u00E2ches \u00B7 Rapport Hebdo.</div>'
-    // Cycle
-    +'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--b9);margin:0 0 4px;">Cycle de Travail Hebdomadaire</div>'
-    +cycleHtml
-    // Grid 2 cols: sections essentielles en haut
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'
-    +ordo+planning+'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'
-    +suivi+rapport+'</div>'
-    // Modules secondaires
-    +'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--b9);margin:10px 0 6px;">Autres Modules</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">'
-    +droits+dashboard+masterplan+'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'
-    +excel+sync+'</div>'
-    // Métiers
-    +'<div style="'+S.card+' margin-bottom:8px;">'
-    +'<div style="'+S.hdr2+'">&#128119; 18 M\u00E9tiers Officiels (modifiables dans Gestion Base ou Excel)</div>'
-    +'<div style="font-size:11px;color:var(--g600);line-height:1.8;">'
-    +'AGENT ADMINISTRATIF \u00B7 CHAUFFEUR-PL \u00B7 CHAUFFEUR-VL \u00B7 CHEF ATELIER \u00B7 CONVOYEUR \u00B7 ELECTRICIEN \u00B7 ENTRETIEN GARAGE \u00B7 MAGASINIER \u00B7 MECANICIEN-ENGIN \u00B7 MECANICIEN-Entretien \u00B7 MECANICIEN-PL \u00B7 MECANICIEN-VL \u00B7 OUTILLAGES \u00B7 PEINTRE \u00B7 PNEUMATICIEN \u00B7 SOUDEUR \u00B7 STAGIERE \u00B7 TOLIER'
-    +'</div></div>'
-    +'</div>';
+  // ── Section 6 : GANTT (DM uniquement) ────────────────────────
+  var secGantt = isDM ? '<div style="' + S.card + '">' +
+    '<div style="' + S.h2 + '">📈 6. Rapport GANTT Stratégique (CODIR)</div>' +
+    '<div style="font-size:11px;color:var(--g600);margin-bottom:8px;">Accessible depuis <strong>Ordonnancement → 📈 GANTT A4H</strong></div>' +
+    step('▸','<strong>Présélection automatique :</strong> Top 10 semaine + 10 équipements suivants dans l\'ordonnancement.') +
+    step('▸','<strong>Durée estimée</strong> réglable : 1 sem / 2 sem / 3 sem / 1 mois.') +
+    step('▸','<strong>Barres colorées :</strong> vert ≥75%, orange 40–74%, rouge &lt;40%.') +
+    step('▸','<strong>Icônes risque :</strong> ⚠️ = fin dépassée &lt;50% | 🔴 = retard critique &lt;100%.') +
+    step('▸','<strong>KPIs en tête :</strong> taux de réalisation global, planifiés ce mois, retards critiques.') +
+    step('▸','Bouton <strong>🖨 Imprimer A4H</strong> → impression paysage avec logo et signature.') +
+  '</div>' : '';
+
+  // ── Section 7 : Astuces & Erreurs fréquentes ─────────────────
+  var secAstuces = '<div style="' + S.warnCard + '">' +
+    '<div style="' + S.h2 + '">💡 ' + (isDM ? '7' : '6') + '. Astuces &amp; Erreurs Fréquentes</div>' +
+    '<div style="' + S.h3 + '">Badges de synchronisation</div>' +
+    '<ul style="padding-left:16px;margin:0 0 8px;">' +
+      li('<span style="color:#10b981;font-weight:700;">☁ Cloud actif</span> (vert) → Firebase connecté, sync temps réel ON.') +
+      li('<span style="color:#f59e0b;font-weight:700;">☁ Hors-ligne</span> (orange) → Internet coupé. Données sauvegardées localement.') +
+      li('<span style="color:#ef4444;font-weight:700;">☁ Erreur</span> (rouge) → Problème Firebase. Rechargez ou consultez le Diagnostic.') +
+    '</ul>' +
+    '<div style="' + S.h3 + '">Couleurs dans l\'Ordonnancement</div>' +
+    '<ul style="padding-left:16px;margin:0 0 8px;">' +
+      li('<span style="background:#10b981;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700;">Rang vert</span> → Équipement dans le Top 10 cette semaine.') +
+      li('<span style="background:#f97316;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700;">Rang orange</span> → Rangs 11–20, non planifié cette semaine.') +
+      li('<span style="background:#ef4444;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700;">Rang rouge</span> → Hors Top 20.') +
+    '</ul>' +
+    (isDM
+      ? '<div style="' + S.h3 + '">En cas de désynchronisation</div>' +
+        '<ul style="padding-left:16px;margin:0;">' +
+          li('Gestion Base → <strong>↑ Pousser vers Firebase</strong> : réécrit toutes les données.') +
+          li('Gestion Base → <strong>↓ Recharger depuis Firebase</strong> : récupère les données distantes.') +
+          li('Gestion Base → <strong>🔧 Diagnostic Firebase</strong> : teste les 7 étapes (SDK → Auth → Lecture → Écriture).') +
+        '</ul>'
+      : '<div style="' + S.h3 + '">En cas de désynchronisation</div>' +
+        '<ul style="padding-left:16px;margin:0;">' +
+          li('Rechargez la page (F5) → reconnectez-vous avec Google.') +
+          li('Contactez le Dir. Matériel pour un "Pousser vers Firebase" depuis son PC.') +
+        '</ul>'
+    ) +
+  '</div>';
+
+  return '<div style="max-width:860px;padding:6px 0;">' +
+    profileBanner + secConnexion + secModules + secFlux + secPriorites + secScoring + secGantt + secAstuces +
+    '<div style="text-align:center;font-size:10px;color:var(--g400);padding:12px;border-top:1px solid var(--g200);margin-top:8px;">' +
+      'DM-PLANNING ' + APP_VERSION + ' · SOSETER HYDRO · Créé par F.SEYE — Directeur Matériel' +
+    '</div>' +
+  '</div>';
 }
 
-// ============================================================
-// RÈGLES DE PRIORITÉ — Configuration par champ
-// 23 actions identifiées dans le code, configurables par le DM
-// ============================================================
-var PRIORITY_FIELDS = [
-  // [id, label, module, editableBy]
-  // editableBy: 'both' | 'dm_only' | 'chef_only'
-  ['equip.statut',    'Statut équipement (OK / PANNE)',          'Équipements',       'both'],
-  ['equip.priority',  'Priorité ordonnancement (1–5)',            'Ordonnancement',    'both'],
-  ['equip.pieces',    'Disponibilité pièces',                     'Équipements',       'both'],
-  ['equip.desc',      'Description / Travaux à faire',            'Équipements',       'both'],
-  ['equip.anomalies', 'Anomalies terrain',                        'Équipements',       'both'],
-  ['plan.included',   'Inclure équipement dans le planning',      'Planning Hebdo',    'both'],
-  ['plan.agent',      'Agent affecté (Planning Hebdo)',           'Planning Hebdo',    'both'],
-  ['plan.realisation','Réalisation % — avancement réel',          'Planning Hebdo',    'both'],
-  ['plan.commentaire','Commentaire opérationnel Planning',         'Planning Hebdo',    'both'],
-  ['plan.pieces',     'Pièces Planning (confirmation terrain)',    'Planning Hebdo',    'both'],
-  ['plan.rptComment', 'Commentaire Rapport Hebdomadaire',          'Rapport Hebdo',     'both'],
-  ['mp.cell',         'Cellule Master Planning (état mensuel)',   'Master Planning',   'both'],
-  ['dm.text',         'Texte d\'une instruction DM',              'Instructions DM',   'dm_only'],
-  ['dm.priority',     'Priorité d\'une instruction DM',           'Instructions DM',   'dm_only'],
-  ['dm.dest',         'Destinataire d\'une instruction DM',       'Instructions DM',   'dm_only'],
-  ['dm.executed',     'Validation instruction (case à cocher)',   'Instructions DM',   'dm_only'],
-  ['dm.comment',      'Commentaire retour d\'exécution (Chef)',   'Instructions DM',   'chef_only'],
-  ['agent.actif',     'Agent actif / inactif (RH)',               'Personnel / RH',    'both'],
-  ['agent.metier',    'Métier de l\'agent',                       'Personnel / RH',    'dm_only'],
-  ['agent.heures',    'Heures journalières de l\'agent',          'Personnel / RH',    'dm_only'],
-  ['suivi.done',      'Validation tâche (case à cocher)',         'Suivi des Tâches',  'both'],
-  ['suivi.rh',        'RH / Agent sur la tâche',                  'Suivi des Tâches',  'both'],
-  ['suivi.anomalies', 'Anomalie documentée sur tâche',            'Suivi des Tâches',  'both']
-];
 
 function savePriorityRule(fieldId, winner) {
   if (!APP.priorityRules) APP.priorityRules = {};
@@ -5558,8 +5574,11 @@ function toggleMP(eid, mk) {
   var key = eid + '_' + mk;
   var cur = APP.masterplan[key] || '';
   APP.masterplan[key] = cur === 'plan' ? 'done' : cur === 'done' ? '' : 'plan';
-  saveApp(); renderMP();
-  toast(APP.masterplan[key] === 'plan' ? 'Planifie' : APP.masterplan[key] === 'done' ? 'Marque termine' : 'Efface');
+  _stampField('mp.cell.' + key);
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  renderMP();
+  toast(APP.masterplan[key] === 'plan' ? 'Planifié' : APP.masterplan[key] === 'done' ? 'Marqué terminé' : 'Effacé');
 }
 
 // ============================================================
@@ -5754,51 +5773,33 @@ function autoGeneratePlanning() {
   APP.equips.forEach(function(e) {
     if (e.statut === 'OK') return;
 
-    // 1+2. Master Planning
+    // ── Critère 1 : Master Planning ce mois (+100 pts)
     var mpKey = e.id + '_' + curMonth;
     var mpVal = APP.masterplan[mpKey] || '';
-    var mpScore = (mpVal === 'plan') ? 40 : 0;
-    var today2 = new Date();
-    MONTHS6.forEach(function(m) {
-      var v = APP.masterplan[e.id + '_' + m.k] || '';
-      if (v === 'plan') {
-        var endOfM = new Date(new Date(m.k + '-01').getFullYear(), new Date(m.k + '-01').getMonth()+1, 0);
-        if (endOfM >= today2) mpScore += 20;
-      }
-    });
-    mpScore = Math.min(mpScore, 60); // cap à 60
+    var mpScore = (mpVal === 'plan') ? 100 : 0;
 
-    // 3. Score ordonnancement
-    var ordScore = scoreE(e);
+    // ── Critère 2 : Pièces disponibles
+    var pieceScore = e.pieces === 'Disponible' ? 50 : e.pieces === 'Partiellement disponible' ? 30 : 0;
 
-    // 4. Réalisation — utilise computeEquipPct (suivi tâches) ET planning.daily
+    // ── Critère 3 : Priorité opérationnelle (1=critique → +32, 5=faible → +0)
+    var prio = e.priority || 3;
+    var prioScore = Math.max(0, 40 - prio * 8);
+
+    // ── Critère 4 : Travaux en cours (suivi tâches + saisie planning)
     var pct = computeEquipPct(e.id);
     var bestDayReal = 0;
     days.forEach(function(d) {
       var dd = APP.planning.daily[d] || {};
       if (dd[e.id] && dd[e.id].realisation) bestDayReal = Math.max(bestDayReal, parseInt(dd[e.id].realisation)||0);
     });
-    var effectivePct = Math.max(pct, bestDayReal); // prendre le plus élevé
-    var realScore;
-    if (effectivePct > 0 && effectivePct < 100) {
-      realScore = 40; // travail commencé → PRIORITÉ ABSOLUE conservation
-    } else if (effectivePct === 0) {
-      realScore = 10; // pas commencé
-    } else {
-      realScore = 0;  // terminé à 100%
-    }
+    var effectivePct = Math.max(pct, bestDayReal);
+    var realScore = (effectivePct >= 25 && effectivePct < 100) ? 20 : 0;
     var inProgress = effectivePct > 0 && effectivePct < 100;
 
-    // 5. Instructions DM
+    // ── Critère 5 : Instructions DM ciblant cet équipement (+15/instruction)
     var dmScore = (APP.dm || []).filter(function(d){ return !d.executed && d.dest.toUpperCase().indexOf(e.code) !== -1; }).length * 15;
 
-    // 6. Urgences
-    var urgScore = (APP.urg || []).find(function(u){ return u.code === e.code; }) ? 25 : 0;
-
-    // 7. Priorité équipement (1=haute, 5=basse) → 25, 20, 15, 10, 5
-    var prioScore = (6 - (e.priority || 3)) * 5;
-
-    var total = mpScore + ordScore + realScore + dmScore + urgScore + prioScore;
+    var total = mpScore + pieceScore + prioScore + realScore + dmScore;
     candidates.push({ e: e, score: total, inProgress: inProgress, effectivePct: effectivePct });
   });
 
@@ -5876,9 +5877,11 @@ function autoGeneratePlanning() {
   // Store the current week's top10 for report filtering
   APP.planning.weekKey = weekKey;
   APP.planning.top10ids = top10ids.slice();
-  _stampSection('planning'); // marquer la section planning comme modifiée
+  _stampSection('planning');
+  _stampField('plan.generateTop10');
 
   saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
   renderPlanDay(curPlanDay);
   var inProg = candidates.filter(function(c){ return c.inProgress && top10ids.indexOf(c.e.id)>-1; }).length;
   toast('\u26a1 Top 10 g\u00e9n\u00e9r\u00e9 : ' + top10ids.length + ' \u00e9quipements | ' + skipped + ' fig\u00e9(s) | ' + inProg + ' en cours conserv\u00e9(s).');
@@ -6132,8 +6135,11 @@ function addSuiviTache(eid) {
   var desc = descEl ? descEl.value.trim() : '';
   if (!nom && !desc) { toast('Saisissez au moins un nom ou une description.'); return; }
   var taches = getSuiviEquipTaches(eid);
-  taches.push({ id: 't' + Date.now() + '_' + Math.random().toString(36).slice(2,6), nom: nom, desc: desc, rh: [], done: false });
+  var newTache = { id: 't' + Date.now() + '_' + Math.random().toString(36).slice(2,6), nom: nom, desc: desc, rh: [], done: false, addedBy: ROLE, addedAt: Date.now() };
+  taches.push(newTache);
+  _stampField('suivi.addTask.' + eid + '.' + newTache.id);
   saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
   if (nomEl) nomEl.value = '';
   if (descEl) descEl.value = '';
   refreshSuiviBlock(eid);
@@ -6149,6 +6155,7 @@ function delSuiviTache(eid, tid) {
   APP.suiviTaches[wk][eid].taches = (APP.suiviTaches[wk][eid].taches || []).filter(function(t) {
     return t.id !== tid;
   });
+  _stampField('suivi.deleteTask.' + eid + '.' + tid);
   saveApp();
   if (_fbReady && _fbDB) _fbWriteToCloud();
   refreshSuiviBlock(eid);
@@ -6177,6 +6184,7 @@ function validateSuiviTache(eid, tid, isDone) {
     toast('⚠️ Attention : Le statut de ' + eq.code + ' est toujours OK. Veuillez le modifier manuellement dans le module Équipements si nécessaire.', 5000);
   }
   saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
   refreshSuiviBlock(eid);
 }
 
@@ -6233,11 +6241,16 @@ function saveRHPicker() {
   if (_rhPickerEid && _rhPickerTid) {
     var taches = getSuiviEquipTaches(_rhPickerEid);
     var t = taches.find(function(x){ return x.id === _rhPickerTid; });
-    if (t) { t.rh = checked; saveApp(); }
+    if (t) {
+      t.rh = checked;
+      _stampField('suivi.rh.' + _rhPickerEid + '.' + _rhPickerTid);
+      saveApp();
+      if (_fbReady && _fbDB) _fbWriteToCloud();
+    }
     var eid = _rhPickerEid;
     closeM('m-rh-picker');
     refreshSuiviBlock(eid);
-    toast('RH affecté(s): ' + checked.length + ' agent(s).');
+    toast('RH affecté(s) : ' + checked.length + ' agent(s).');
   }
 }
 
@@ -6423,7 +6436,14 @@ function renderChargeGlobale() {
 
 function updAgentSupp(id, val) {
   var a = APP.agents.find(function(a){return a.id===id;});
-  if (a) { a.supp = parseFloat(val)||0; saveApp(); toast('H.Supp mis a jour: ' + a.nom + ' -> ' + val + 'h'); renderChargeGlobale(); }
+  if (a) {
+    a.supp = parseFloat(val)||0;
+    _stampField('agent.' + id + '.supp');
+    saveApp();
+    if (_fbReady && _fbDB) _fbWriteToCloud();
+    toast('H.Supp mis à jour : ' + a.nom + ' → ' + val + 'h');
+    renderChargeGlobale();
+  }
 }
 
 function deleteTache(tid) {
@@ -6472,13 +6492,44 @@ function scoreE(e) {
 }
 
 function renderOrdList() {
-  var pannes = _activeEquips().filter(function(e) { return e.statut === 'PANNE'; });
+  // Filtrer PANNE + IMMOBILISE uniquement (pas les OK)
+  var searchQ = ((document.getElementById('ord-search') || {}).value || '').toLowerCase().trim();
+  var pannes = _activeEquips().filter(function(e) {
+    return e.statut === 'PANNE' || e.statut === 'IMMOBILISE';
+  });
   var sorted = pannes.slice().sort(function(a,b) { return scoreE(b) - scoreE(a); });
+
+  // Appliquer le filtre de recherche
+  if (searchQ) {
+    sorted = sorted.filter(function(e) {
+      return (e.code || '').toLowerCase().indexOf(searchQ) > -1 ||
+             (e.desc || '').toLowerCase().indexOf(searchQ) > -1 ||
+             (e.famille || '').toLowerCase().indexOf(searchQ) > -1;
+    });
+  }
+
+  // Récupérer le Top 10 de la semaine courante
+  var top10ids = APP.planning.top10ids || [];
+
   var c = document.getElementById('ord-list');
   if (!c) return;
+  if (!sorted.length) {
+    c.innerHTML = '<div class="al ai" style="margin-top:10px;">Aucun équipement PANNE ou IMMOBILISÉ' + (searchQ ? ' correspondant à "' + searchQ + '"' : '') + '.</div>';
+    return;
+  }
   c.innerHTML = sorted.map(function(e, i) {
+    // Couleur du badge de rang
+    var rankInTop10 = top10ids.indexOf(e.id);
+    var rankColor, rankBg, rankTitle;
+    if (rankInTop10 > -1) {
+      rankColor = '#fff'; rankBg = '#10b981'; rankTitle = 'Dans le Top 10 cette semaine';
+    } else if (i < 20) {
+      rankColor = '#fff'; rankBg = '#f97316'; rankTitle = 'Rang ' + (i+1) + ' — non planifié cette semaine';
+    } else {
+      rankColor = '#fff'; rankBg = '#ef4444'; rankTitle = 'Rang ' + (i+1) + ' — hors Top 20';
+    }
     return '<div class="pitem" style="cursor:default;">' +
-      '<span class="prank">' + (i+1) + '</span>' +
+      '<span class="prank" title="' + rankTitle + '" style="background:' + rankBg + ';color:' + rankColor + ';min-width:26px;text-align:center;border-radius:50%;padding:2px 6px;">' + (i+1) + '</span>' +
       '<div style="flex:1;">' +
         '<div style="display:flex;align-items:center;gap:5px;">' +
           '<strong>' + e.code + '</strong>' +
@@ -6560,7 +6611,10 @@ function cycleStatus(id) {
   e.statut = c[(c.indexOf(e.statut)+1)%c.length];
   _stampField('equip.' + e.code + '.statut');
   APP.hist.unshift({ id:'h'+Date.now(), date:new Date().toISOString().split('T')[0], code:e.code, famille:e.famille, type:'ENTRETIEN', desc:'Statut change vers ' + e.statut, statut:e.statut, realisation:0 });
-  saveApp(); filterEq(); toast(e.code + ' -> ' + e.statut);
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  filterEq();
+  toast(e.code + ' → ' + e.statut);
 }
 
 function delEquip(id) {
@@ -6575,7 +6629,9 @@ function delEquip(id) {
     _stampField('equip.' + (e.code || id) + '.deleted');
     _stampSection('equips');
   }
-  saveApp(); filterEq();
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  filterEq();
 }
 
 // Nettoyer les équipements supprimés du JSON après 7 jours (appel périodique)
@@ -6602,8 +6658,14 @@ function saveEquip() {
     pieces: 'Non disponible', checklist: []
   };
   APP.equips.push(e);
-  APP.hist.unshift({ id:'h'+Date.now(), date:new Date().toISOString().split('T')[0], code:e.code, famille:e.famille, type:'ENTRETIEN', desc:'Entree garage', statut:e.statut, realisation:0 });
-  saveApp(); closeM('m-equip'); toast(code + ' ajoute.'); filterEq();
+  APP.hist.unshift({ id:'h'+Date.now(), date:new Date().toISOString().split('T')[0], code:e.code, famille:e.famille, type:'ENTRETIEN', desc:'Entrée garage', statut:e.statut, realisation:0 });
+  _stampField('equip.' + code + '.create');
+  _stampSection('equips');
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  closeM('m-equip');
+  toast(code + ' ajouté.');
+  filterEq();
 }
 
 // ============================================================
@@ -6657,7 +6719,9 @@ function updAgent(id, field, val) {
   else a[field] = Number(val);
   // Timestamp pour Smart Merge — traçabilité de la modification
   _stampField('agent.' + id + '.' + field);
-  saveApp(); renderRH();
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  renderRH();
 }
 function delAgent(id) {
   if (!confirm('Supprimer cet agent définitivement ? Cette action est irréversible.')) return;
@@ -6695,7 +6759,11 @@ function saveAgent() {
   APP.agents.push(newAgent);
   _stampField('agent.' + newAgent.id + '.actif');
   _stampSection('agents');
-  saveApp(); closeM('m-agent'); toast('Agent ajouté.'); renderRH();
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  closeM('m-agent');
+  toast('Agent ajouté.');
+  renderRH();
 }
 
 // ============================================================
@@ -6777,9 +6845,10 @@ function markDone(id, val) {
   var d = APP.dm.find(function(d){return d.id===id;});
   if (d) {
     d.executed = val;
-    if (!APP.fieldTs) APP.fieldTs = {};
-    APP.fieldTs['dm.' + id + '.executed'] = Date.now();
-    saveApp(); renderDMPage();
+    _stampField('dm.' + id + '.executed');
+    saveApp();
+    if (_fbReady && _fbDB) _fbWriteToCloud();
+    renderDMPage();
   }
 }
 function addDMComment(id, c) {
@@ -6792,11 +6861,19 @@ function addDMComment(id, c) {
     }
     d.comment = c;
     if (!APP.fieldTs) APP.fieldTs = {};
-    APP.fieldTs['dm.' + id + '.comment'] = Date.now();
+    _stampField('dm.' + id + '.comment');
     saveApp();
+    if (_fbReady && _fbDB) _fbWriteToCloud();
   }
 }
-function delDM(id) { if (!confirm('Supprimer ?')) return; APP.dm = APP.dm.filter(function(d){return d.id!==id;}); saveApp(); renderDMPage(); }
+function delDM(id) {
+  if (!confirm('Supprimer cette instruction ?')) return;
+  APP.dm = APP.dm.filter(function(d){return d.id!==id;});
+  _stampField('dm.deleteInstruction.' + id);
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  renderDMPage();
+}
 function saveDM() {
   var txt = document.getElementById('nd-text').value.trim();
   if (!txt) { alert('Instruction requise.'); return; }
@@ -6805,10 +6882,13 @@ function saveDM() {
   APP.dm.unshift(newInstr);
   _stampField('dm.' + newInstr.id + '.text');
   _stampSection('dm_inst');
-  saveApp(); closeM('m-dm');
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  closeM('m-dm');
   document.getElementById('nd-text').value = '';
   document.getElementById('nd-dest').value = '';
-  toast('Instruction publiée.'); renderDMPage();
+  toast('Instruction publiée.');
+  renderDMPage();
 }
 
 // ============================================================
@@ -6844,13 +6924,21 @@ function addCL() {
   if (!e) return;
   if (!e.checklist) e.checklist = [];
   e.checklist.push({ text:txt, done:false, doneAt:null, createdAt:new Date().toISOString() });
-  saveApp(); renderCL(e); input.value = '';
+  _stampField('equip.' + (e.code||e.id) + '.checklist');
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  renderCL(e);
+  input.value = '';
 }
 function togCL(eid, i, done) {
   var e = APP.equips.find(function(eq) { return eq.id===eid; });
   if (!e || !e.checklist[i]) return;
-  e.checklist[i].done = done; e.checklist[i].doneAt = done ? new Date().toISOString() : null;
-  saveApp(); renderCL(e);
+  e.checklist[i].done = done;
+  e.checklist[i].doneAt = done ? new Date().toISOString() : null;
+  _stampField('equip.' + (e.code||e.id) + '.checklist.' + i);
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  renderCL(e);
 }
 function delCL(eid, i) {
   var e = APP.equips.find(function(eq) { return eq.id===eid; });
@@ -7173,7 +7261,24 @@ var _ganttSelectedIds = null; // null = tous sélectionnés
 function openGanttModal() {
   var modal = document.getElementById('gantt-modal');
   if (!modal) return;
-  _ganttSelectedIds = null; // reset → tout sélectionné
+
+  // Présélection intelligente : Top10 + 10 équipements suivants dans l'ordonnancement
+  var top10ids = APP.planning.top10ids || [];
+  var pannes = _activeEquips().filter(function(e){ return e.statut !== 'OK'; });
+  pannes.sort(function(a,b){ return scoreE(b) - scoreE(a); });
+
+  // Prendre les IDs du Top10 + les 10 suivants dans le classement
+  var preselect = top10ids.slice();
+  var added = 0;
+  pannes.forEach(function(e) {
+    if (added >= 10) return;
+    if (preselect.indexOf(e.id) === -1) {
+      preselect.push(e.id);
+      added++;
+    }
+  });
+  _ganttSelectedIds = preselect.length > 0 ? preselect : null;
+
   _buildGanttEquipSelect();
   renderGantt();
   modal.style.display = 'block';
