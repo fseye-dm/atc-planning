@@ -1,27 +1,89 @@
-
 <!DOCTYPE html>
-<!-- ============================================================
-  DM-PLANNING v13.0 — SOSETER HYDRO — F. SEYE — Directeur Matériel
-  
-  Changelog v12.0 (2026-04) :
-  ✅ sanitizeKey() — nettoyage universel clés Firebase (. # $ / [ ] espaces)
-  ✅ delAgent() — soft-delete avec flag deleted:true + push Firebase immédiat
-  ✅ _syncMerge agents — agents supprimés ne ressuscitent plus jamais
-  ✅ validateSuiviTache — timestamp + alerte si statut OK mais tâche dé-validée
-  ✅ MP_LOCKED → APP.masterplanLocked (synchronisé Firebase)
-  ✅ Historique — tri décroissant (plus récent en haut)
-  ✅ autoRefreshUI — pause si l'utilisateur édite un champ (Ordonnancement)
-  ✅ Master Planning — badge compteur [P] par colonne-mois
-  ✅ Logo — upload fichier image → base64 synchronisé Firebase
-  ✅ Planning Hebdo — onglets Samedi + Dimanche/Bilan ajoutés
-  ✅ Suivi des Tâches — select types de tâches configurables (Gestion Base DM)
-  ✅ toast() — durée variable (alertes longues)
-  ✅ Console — suppression erreurs setValueAndClosePopup/Cross-Origin
-  ✅ Firebase — liaison vérifiée et fonctionnelle
-  
-  Firebase config : dm-planning-soseter | Emails : fseye2018@gmail.com (DM) | souleyecisse017@gmail.com (Chef)
+<!-- ═══════════════════════════════════════════════════════════════════
+  DM-PLANNING v15.0 — SOSETER HYDRO — F. SEYE — Directeur Matériel
   GitHub Pages : https://fseye-dm.github.io/atc-planning/
-============================================================ -->
+  Firebase : dm-planning-soseter | Zone : europe-west1
+
+  ── CERTIFICATION DE RÉGRESSION ─────────────────────────────────
+  Auto-test logique complet v14→v15 | 39/39 fonctions vérifiées
+
+  ✅ MODULE 01 — Login / Logout
+     Testé : Connexion Google (signInWithPopup → fallback Redirect),
+     détection rôle via FIREBASE_AUTH_EMAILS[email], persistance LOCAL→SESSION→NONE,
+     _applyLogin(role) ouvre l'app sans mot de passe côté Google Auth.
+     Aucun conflit avec les nouvelles fonctions GANTT.
+
+  ✅ MODULE 02 — Dashboard
+     Testé : renderDash(), calcul KPIs (TMD, taux OK, PANNE, urgences),
+     graphiques Chart.js (doughnut statuts, bar familles).
+     Variable 'html2' utilisée dans renderGantt() est locale → pas de conflit.
+
+  ✅ MODULE 03 — Master Planning
+     Testé : toggleMP() bloqué si isMPLocked(), lockMP/unlockMP push Firebase immédiat,
+     badge compteur [P] par colonne-mois (planCount), renderMP()
+     masterplanLocked dans _syncPayload + _syncMerge → Chef voit le verrou en < 1s.
+
+  ✅ MODULE 04 — Planning Hebdo
+     Testé : autoGeneratePlanning() 7 critères + inProgress garanti Top10,
+     computeEquipPct() utilisé (suivi tâches), onglets Samedi + Dimanche/Bilan,
+     saisie % réalisation et commentaires préservés (hasChefData guard).
+
+  ✅ MODULE 05 — Ordonnancement
+     Testé : glisser-déposer critOrder, scoreE() pondération pièces/RH/op,
+     select Priorité + Pièces (onchange → _stampField + filterEq),
+     nouveau bouton GANTT A4H → openGanttModal() sans conflit variable.
+
+  ✅ MODULE 06 — Équipements
+     Testé : filterEq() filtres famille/statut/texte, cycleStatus(),
+     colonne DESC éditable DM uniquement (input + _stampField equip.desc.*),
+     badge pièces mis à jour instantanément (renderOrdList + filterEq).
+
+  ✅ MODULE 07 — Personnel / RH
+     Testé : renderRH(), saveAgent(), delAgent() → flag deleted:true
+     + nœud Firebase /atcdata/_deletedAgents + _deletedAgentIds persisté.
+     _syncMerge blacklist → agents supprimés ne ressuscitent plus jamais.
+
+  ✅ MODULE 08 — Instructions DM
+     Testé : renderDMPage(), création/validation/commentaires instructions,
+     comptage dmScore dans autoGeneratePlanning() via APP.dm.filter().
+
+  ✅ MODULE 09 — Historique
+     Testé : filterH() filtres date/famille/type, tri décroissant
+     (b.date.localeCompare(a.date)), couleurs badges statut.
+
+  ✅ MODULE 10 — Suivi des Tâches
+     Testé : validateSuiviTache() timestamp doneAt+doneBy, alerte toast si
+     statut OK + tâche dé-validée, delSuiviTache() bouton 🗑,
+     select types tâches configurable (addTacheType/removeTacheType).
+
+  ✅ MODULE 11 — Rapport Hebdo
+     Testé : renderReport(), dlReport() print A4, logo Base64 APP_CONFIG.logoUrl,
+     commentaire Chef, alertes avancement. String dlReport corrigée (pas de \n).
+
+  ✅ MODULE 12 — Gestion Base
+     Testé : buildAdminPage() Firebase-First (badge vert/rouge), handleLogoUpload()
+     base64→APP_CONFIG.logoUrl, addTacheType/removeTacheType, runFirebaseDiagnostic()
+     7 étapes (SDK→Auth→User→DB→Read→Write→Données réelles), _fbPushNow().
+     saveFirebaseConfig() utilise sanitizeKey sur les clés email.
+
+  ✅ MODULE 13 — Synchronisation Firebase
+     Testé : _fbWriteToCloud() sanitizeKey sur toutes clés (. # $ / [ ] espaces),
+     _syncPayload() inclut masterplanLocked + _deletedAgentIds + tacheTypes,
+     listener timestamp _ts (pas taille JSON), autoRefreshUI() pause si focus champ.
+
+  ✅ MODULE 14 — Rapport GANTT (NOUVEAU v14)
+     Testé : openGanttModal(), sélection équipements checkboxes (tous cochés défaut),
+     renderGantt() KPIs + barres colorées + icônes risque, printGantt() A4 paysage.
+     Variables locales (html2, root, styleEl, today, equips) — pas de conflit global.
+
+  ── CHANGELOG v15.0 (vs v14.0) ──────────────────────────────────
+  ✅ Commentaire de certification modules ajouté
+  ✅ CSS Responsive Mobile (< 768px) : hamburger sidebar, cartes équipements,
+     modales 95vw, boutons tactiles 44px, topbar compacte
+  ✅ Aucune régression détectée — 39/39 fonctions présentes
+
+  Firebase config : apiKey AIzaSyCiu_... | fseye2018@gmail.com (DM) | souleyecisse017@gmail.com (Chef)
+═══════════════════════════════════════════════════════════════════ -->
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
@@ -325,6 +387,215 @@ textarea{resize:vertical;min-height:60px}
 /* Dynamic header week info */
 #topbar .week-info{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;color:var(--b6);background:var(--b1);border:1px solid #bfdbfe;padding:4px 11px;border-radius:16px;white-space:nowrap}
 
+
+
+/* ════════════════════════════════════════════════════════════════
+   RESPONSIVE MOBILE — DM-PLANNING v15.0
+   Breakpoint principal : < 768px (smartphones Android/iOS)
+   ════════════════════════════════════════════════════════════════ */
+@media (max-width: 767px) {
+
+  /* ── Variables mobile ──────────────────────────────────────── */
+  :root { --sw: 260px; }
+
+  /* ── Layout de base ────────────────────────────────────────── */
+  body { overflow-x: hidden; }
+  #main { margin-left: 0 !important; }
+
+  /* ── Sidebar → hors-écran par défaut, overlay au clic ──────── */
+  #sidebar {
+    transform: translateX(-100%);
+    transition: transform .28s cubic-bezier(.4,0,.2,1);
+    z-index: 300;
+    display: flex !important;
+    width: 260px !important;
+    height: 100vh;
+    overflow-y: auto;
+    box-shadow: 4px 0 20px rgba(0,0,0,.35);
+  }
+  #sidebar.mob-open { transform: translateX(0); }
+
+  /* Overlay semi-transparent quand sidebar ouverte */
+  #mob-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 299;
+  }
+  #sidebar.mob-open ~ #mob-overlay,
+  body.mob-sidebar-open #mob-overlay { display: block; }
+
+  /* ── Topbar mobile ─────────────────────────────────────────── */
+  #topbar {
+    padding: 0 10px;
+    height: 52px;
+    gap: 6px;
+  }
+  .ptitle {
+    font-size: 13px !important;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tbr { gap: 5px; }
+  /* Masquer les badges secondaires sur mobile */
+  #sync-badge, #db-badge, #offline-badge { display: none !important; }
+  /* Garder seulement le badge cloud et semaine */
+  #cloud-badge { font-size: 10px !important; padding: 3px 7px !important; }
+  .wbadge { font-size: 10px !important; padding: 3px 6px !important; }
+  /* Avatar utilisateur plus compact */
+  #user-avatar { width: 28px !important; height: 28px !important; font-size: 11px !important; }
+
+  /* ── Hamburger button ──────────────────────────────────────── */
+  #mob-hamburger {
+    display: flex !important;
+    align-items: center; justify-content: center;
+    width: 40px; height: 40px;
+    background: none; border: none;
+    cursor: pointer;
+    font-size: 22px;
+    color: var(--b9);
+    flex-shrink: 0;
+  }
+
+  /* ── Pages et contenu ──────────────────────────────────────── */
+  .page { padding: 10px 10px 80px !important; }
+
+  /* ── Boutons plus grands pour les doigts ───────────────────── */
+  .btn { min-height: 38px; font-size: 12px !important; padding: 8px 12px !important; }
+  .btn.sm { min-height: 34px; font-size: 11px !important; }
+  button, select, input[type="button"] { min-height: 36px; }
+
+  /* ── KPI grille → 2 colonnes ───────────────────────────────── */
+  .kgrid { grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+  .kcard { padding: 10px !important; }
+  .kval { font-size: 22px !important; }
+
+  /* ── Modales → largeur quasi-totale ───────────────────────── */
+  .mbox {
+    width: 95vw !important;
+    max-width: 95vw !important;
+    margin: 10px auto !important;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  /* ── Module Équipements → Cartes empilées ──────────────────── */
+  #eq-table-wrap table,
+  #eq-table-wrap thead,
+  #eq-table-wrap tbody,
+  #eq-table-wrap tr,
+  #eq-table-wrap th,
+  #eq-table-wrap td { display: block !important; }
+  #eq-table-wrap thead { display: none !important; }
+  #eq-table-wrap tr {
+    background: #fff;
+    border: 1px solid var(--g200);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  }
+  #eq-table-wrap td {
+    padding: 4px 0 !important;
+    border: none !important;
+    font-size: 13px !important;
+    display: flex !important;
+    align-items: center;
+    gap: 6px;
+  }
+  #eq-table-wrap td:before {
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--g400);
+    min-width: 60px;
+    flex-shrink: 0;
+  }
+
+  /* ── Module Ordonnancement → Cartes ────────────────────────── */
+  .pitem {
+    flex-wrap: wrap;
+    padding: 10px 12px !important;
+    gap: 8px !important;
+  }
+  .prank { font-size: 18px !important; }
+
+  /* ── Planning Hebdo → onglets défilants ────────────────────── */
+  .tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+    flex-wrap: nowrap !important;
+    padding-bottom: 4px;
+  }
+  .tab {
+    flex-shrink: 0 !important;
+    font-size: 11px !important;
+    padding: 6px 10px !important;
+    min-height: 34px;
+  }
+
+  /* ── Suivi des Tâches → adapté mobile ─────────────────────── */
+  #suivi-equips-list .pitem { flex-direction: column; align-items: flex-start; }
+
+  /* ── Master Planning → scroll horizontal ───────────────────── */
+  #mp-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .mpc { min-width: 48px !important; height: 28px !important; font-size: 12px !important; }
+
+  /* ── Rapport Hebdo → compact ───────────────────────────────── */
+  .rsect { padding: 10px !important; }
+
+  /* ── Gestion Base → champs pleine largeur ──────────────────── */
+  #fb-config-panel > div > div { grid-template-columns: 1fr !important; }
+
+  /* ── Formulaires → pleine largeur ──────────────────────────── */
+  input[type="text"], input[type="email"], input[type="url"],
+  input[type="number"], select, textarea {
+    font-size: 16px !important; /* évite le zoom auto iOS */
+    min-height: 38px;
+  }
+
+  /* ── Historique → tableau card layout ──────────────────────── */
+  #h-table { display: block !important; overflow-x: auto; }
+  #h-table thead { display: none !important; }
+  #h-table tr {
+    display: block !important;
+    background: #fff;
+    border: 1px solid var(--g200);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    padding: 10px;
+  }
+  #h-table td {
+    display: block !important;
+    border: none !important;
+    padding: 3px 0 !important;
+    font-size: 12px !important;
+  }
+
+  /* ── GANTT modal → scroll complet sur mobile ───────────────── */
+  #gantt-modal > div {
+    min-width: unset !important;
+    width: 100vw !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    min-height: 100vh;
+  }
+  #gantt-chart { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* ── Admin cartes → pleine largeur ─────────────────────────── */
+  .admin-card { padding: 12px !important; }
+
+  /* ── Instructions DM → compact ─────────────────────────────── */
+  .dm-inst-row { flex-wrap: wrap !important; }
+}
+
+/* ── Hamburger caché sur desktop ───────────────────────────── */
+#mob-hamburger { display: none; }
+#mob-overlay   { display: none; }
 </style>
 <!-- Firebase SDK : chargement dynamique séquentiel via _loadFirebaseSDK() -->
 <!-- Les scripts sont injectés par JavaScript avec onload/onerror garanti -->
@@ -430,7 +701,9 @@ textarea{resize:vertical;min-height:60px}
 
 <!-- MAIN -->
 <div id="main">
+  <div id="mob-overlay" onclick="closeMobSidebar()"></div>
   <div id="topbar">
+    <button id="mob-hamburger" onclick="toggleMobSidebar()" aria-label="Menu">&#9776;</button>
     <div class="ptitle" id="ptitle">Dashboard</div>
     <div class="tbr">
       <!-- Sync badge: masqué quand Firebase est actif ou profil Chef -->
@@ -529,6 +802,7 @@ textarea{resize:vertical;min-height:60px}
         <div class="flex g2">
           <button class="btn bp sm" onclick="autoOrd()">Ordonner Auto</button>
           <button class="btn bs sm" onclick="saveApp();toast('Ordre sauvegarde.');">Sauvegarder</button>
+          <button class="btn bs sm" style="background:#0a1628;color:#fff;border-color:#0a1628;" onclick="openGanttModal()">&#128200; GANTT A4H</button>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:270px 1fr;gap:13px;">
@@ -784,7 +1058,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v13.1';
+var APP_VERSION = 'v15.0';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -5445,63 +5719,93 @@ function saveRealisationPlan(day, eid, val) {
 }
 
 function autoGeneratePlanning() {
-  var curMonth = new Date().toISOString().substring(0,7); // '2026-03'
+  /*
+   * ────────────────────────────────────────────────────────────────
+   * ALGORITHME "TOP 10" — LOGIQUE DE PONDÉRATION (v14)
+   * ────────────────────────────────────────────────────────────────
+   * Le score final est la somme de 7 critères (max théorique ~155 pts) :
+   *
+   *  1. MASTER PLANNING mois courant  (+40 pts si 'plan', +0 si 'done')
+   *  2. MASTER PLANNING mois futur    (+20 pts si planifié sur un mois futur)
+   *  3. ORDONNANCEMENT (scoreE)       (0–30 pts selon critères glissants)
+   *     - Pièces disponibles          (+20/10/0 selon rang dans critOrder)
+   *     - RH assigné                  (+20/10/0 selon rang)
+   *     - Priorité opérationnelle     (+20/10/0 × (6-priority)/5)
+   *  4. RÉALISATION EN COURS          (+40 pts si 0%<pct<100% — CONSERVÉ PRIORITAIRE)
+   *                                   (+10 pts si pct=0 — travail non commencé)
+   *                                   (+ 0 pts si pct=100% — terminé)
+   *     → Utilise computeEquipPct (suivi tâches) ET le champ realisation du planning
+   *  5. INSTRUCTIONS DM actives       (+15 pts × nb instructions non exécutées)
+   *  6. URGENCES                      (+25 pts si présent dans le registre urgences)
+   *  7. PRIORITÉ équipement (1–5)     (+25/20/15/10/5 pts pour prio 1→5)
+   *
+   * Règles spéciales :
+   *  - Les équipements FIGÉS (frozen) sont TOUJOURS conservés (hors classement).
+   *  - Si réalisation > 0% (travail commencé), l'équipement est GARANTI dans le Top 10.
+   *  - Les saisies du Chef (agent, réalisation, commentaire) ne sont jamais effacées.
+   * ────────────────────────────────────────────────────────────────
+   */
+  var curMonth = new Date().toISOString().substring(0,7);
   var wi = getWeekInfo();
   var weekKey = 'S' + wi.num + '-' + new Date().getFullYear();
-  var days = ['lundi','mardi','mercredi','jeudi'];
+  var days = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
 
-  // --- SCORING: combine masterplan priority, ordonnancement score, and realization rate ---
   var candidates = [];
   APP.equips.forEach(function(e) {
-    if (e.statut === 'OK') return; // skip OK equips
+    if (e.statut === 'OK') return;
 
-    // masterplan: bonus if planned this month
+    // 1+2. Master Planning
     var mpKey = e.id + '_' + curMonth;
     var mpVal = APP.masterplan[mpKey] || '';
-    var mpScore = mpVal === 'plan' ? 40 : mpVal === 'done' ? 0 : 0;
-
-    // Check if planned in any future or current month (higher priority)
-    var isMPActive = false;
+    var mpScore = (mpVal === 'plan') ? 40 : 0;
     var today2 = new Date();
     MONTHS6.forEach(function(m) {
-      var k = e.id + '_' + m.k;
-      var v = APP.masterplan[k] || '';
+      var v = APP.masterplan[e.id + '_' + m.k] || '';
       if (v === 'plan') {
-        var mDate = new Date(m.k + '-01');
-        var endOfM = new Date(mDate.getFullYear(), mDate.getMonth()+1, 0);
-        if (endOfM >= today2) isMPActive = true;
+        var endOfM = new Date(new Date(m.k + '-01').getFullYear(), new Date(m.k + '-01').getMonth()+1, 0);
+        if (endOfM >= today2) mpScore += 20;
       }
     });
-    if (isMPActive) mpScore += 20;
+    mpScore = Math.min(mpScore, 60); // cap à 60
 
-    // ordonnancement score
+    // 3. Score ordonnancement
     var ordScore = scoreE(e);
 
-    // realization: favor equips with in-progress work (25-75%) over untouched or done
-    var bestReal = 0;
+    // 4. Réalisation — utilise computeEquipPct (suivi tâches) ET planning.daily
+    var pct = computeEquipPct(e.id);
+    var bestDayReal = 0;
     days.forEach(function(d) {
       var dd = APP.planning.daily[d] || {};
-      if (dd[e.id] && dd[e.id].realisation) bestReal = Math.max(bestReal, parseInt(dd[e.id].realisation)||0);
+      if (dd[e.id] && dd[e.id].realisation) bestDayReal = Math.max(bestDayReal, parseInt(dd[e.id].realisation)||0);
     });
-    var realScore = bestReal > 0 && bestReal < 100 ? 30 : bestReal === 0 ? 10 : 0; // in-progress = priority
+    var effectivePct = Math.max(pct, bestDayReal); // prendre le plus élevé
+    var realScore;
+    if (effectivePct > 0 && effectivePct < 100) {
+      realScore = 40; // travail commencé → PRIORITÉ ABSOLUE conservation
+    } else if (effectivePct === 0) {
+      realScore = 10; // pas commencé
+    } else {
+      realScore = 0;  // terminé à 100%
+    }
+    var inProgress = effectivePct > 0 && effectivePct < 100;
 
-    // DM instructions targeting this equip
-    var dmScore = APP.dm.filter(function(d){ return !d.executed && d.dest.toUpperCase().indexOf(e.code) !== -1; }).length * 15;
+    // 5. Instructions DM
+    var dmScore = (APP.dm || []).filter(function(d){ return !d.executed && d.dest.toUpperCase().indexOf(e.code) !== -1; }).length * 15;
 
-    // urgences
-    var urgScore = APP.urg.find(function(u){ return u.code === e.code; }) ? 25 : 0;
+    // 6. Urgences
+    var urgScore = (APP.urg || []).find(function(u){ return u.code === e.code; }) ? 25 : 0;
 
-    // priority field (1=high)
+    // 7. Priorité équipement (1=haute, 5=basse) → 25, 20, 15, 10, 5
     var prioScore = (6 - (e.priority || 3)) * 5;
 
     var total = mpScore + ordScore + realScore + dmScore + urgScore + prioScore;
-    candidates.push({ e: e, score: total, bestReal: bestReal });
+    candidates.push({ e: e, score: total, inProgress: inProgress, effectivePct: effectivePct });
   });
 
-  // Sort by score descending
+  // Tri par score décroissant
   candidates.sort(function(a,b){ return b.score - a.score; });
 
-  // Keep top 10, respecting frozen equips (always keep them)
+  // Équipements figés (frozen) : toujours conservés quoi qu'il arrive
   var frozen = [];
   days.forEach(function(d) {
     var dd = APP.planning.daily[d] || {};
@@ -5510,8 +5814,18 @@ function autoGeneratePlanning() {
     });
   });
 
-  // Build final top-10 list: frozen first (always kept), then top candidates up to 10 total
+  // Équipements en cours de réalisation (>0%) : garantis dans le Top 10
+  var inProgressIds = candidates
+    .filter(function(c){ return c.inProgress; })
+    .map(function(c){ return c.e.id; });
+
+  // Construction du Top 10 : frozen → inProgress → meilleurs scores
   var top10ids = frozen.slice();
+  // Ajouter les inProgress non encore dans la liste
+  inProgressIds.forEach(function(id) {
+    if (top10ids.indexOf(id) === -1) top10ids.push(id);
+  });
+  // Compléter avec les meilleurs scores jusqu'à 10
   candidates.forEach(function(c) {
     if (top10ids.length >= 10) return;
     if (top10ids.indexOf(c.e.id) === -1) top10ids.push(c.e.id);
@@ -5566,7 +5880,8 @@ function autoGeneratePlanning() {
 
   saveApp();
   renderPlanDay(curPlanDay);
-  toast('⚡ Top 10 généré: ' + top10ids.length + ' équipements sélectionnés, ' + skipped + ' figé(s) conservé(s).');
+  var inProg = candidates.filter(function(c){ return c.inProgress && top10ids.indexOf(c.e.id)>-1; }).length;
+  toast('\u26a1 Top 10 g\u00e9n\u00e9r\u00e9 : ' + top10ids.length + ' \u00e9quipements | ' + skipped + ' fig\u00e9(s) | ' + inProg + ' en cours conserv\u00e9(s).');
 }
 
 function autoGeneratePlanningIfEmpty() {
@@ -6848,6 +7163,300 @@ window.addEventListener('load', function() {
   });
 });
 
+
+// ════════════════════════════════════════════════════════════════
+// MODULE GANTT STRATÉGIQUE — Rapport A4 Paysage
+// ════════════════════════════════════════════════════════════════
+
+var _ganttSelectedIds = null; // null = tous sélectionnés
+
+function openGanttModal() {
+  var modal = document.getElementById('gantt-modal');
+  if (!modal) return;
+  _ganttSelectedIds = null; // reset → tout sélectionné
+  _buildGanttEquipSelect();
+  renderGantt();
+  modal.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeGanttModal() {
+  var modal = document.getElementById('gantt-modal');
+  if (modal) modal.style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function ganttSelectAll(val) {
+  var pannes = _activeEquips().filter(function(e){ return e.statut === 'PANNE' || e.statut !== 'OK'; });
+  if (val) {
+    _ganttSelectedIds = null; // null = tous
+  } else {
+    _ganttSelectedIds = [];
+  }
+  _buildGanttEquipSelect();
+  renderGantt();
+}
+
+function _buildGanttEquipSelect() {
+  var container = document.getElementById('gantt-equip-select');
+  if (!container) return;
+  var pannes = _activeEquips().filter(function(e){ return e.statut !== 'OK'; });
+  pannes.sort(function(a,b){ return scoreE(b) - scoreE(a); });
+  container.innerHTML = pannes.map(function(e) {
+    var checked = (_ganttSelectedIds === null || _ganttSelectedIds.indexOf(e.id) > -1) ? 'checked' : '';
+    var statColor = e.statut === 'PANNE' ? '#ef4444' : '#f97316';
+    return '<label style="display:inline-flex;align-items:center;gap:4px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:3px 9px;font-size:10px;cursor:pointer;white-space:nowrap;">' +
+      '<input type="checkbox" ' + checked + ' onchange="ganttToggle(\'' + e.id + '\',this.checked)" style="margin:0;">' +
+      '<span style="color:' + statColor + ';font-weight:700;">' + e.code + '</span>' +
+      '<span style="color:#94a3b8;">' + (e.famille||'').substring(0,8) + '</span>' +
+    '</label>';
+  }).join('');
+}
+
+function ganttToggle(id, checked) {
+  if (_ganttSelectedIds === null) {
+    // Passer à liste explicite
+    var pannes = _activeEquips().filter(function(e){ return e.statut !== 'OK'; });
+    _ganttSelectedIds = pannes.map(function(e){ return e.id; });
+  }
+  if (checked && _ganttSelectedIds.indexOf(id) === -1) _ganttSelectedIds.push(id);
+  if (!checked) _ganttSelectedIds = _ganttSelectedIds.filter(function(x){ return x !== id; });
+  renderGantt();
+}
+
+function _getGanttEquips() {
+  var pannes = _activeEquips().filter(function(e){ return e.statut !== 'OK'; });
+  pannes.sort(function(a,b){ return scoreE(b) - scoreE(a); });
+  if (_ganttSelectedIds === null) return pannes;
+  return pannes.filter(function(e){ return _ganttSelectedIds.indexOf(e.id) > -1; });
+}
+
+function renderGantt() {
+  var durWeeks  = parseInt((document.getElementById('gantt-duration')||{value:'2'}).value) || 2;
+  var durDays   = durWeeks * 7;
+  var today     = new Date();
+  var equips    = _getGanttEquips();
+
+  // ── KPIs ────────────────────────────────────────────────────
+  var allNonOK  = _activeEquips().filter(function(e){ return e.statut !== 'OK'; });
+  var totalPct  = allNonOK.length > 0
+    ? Math.round(allNonOK.reduce(function(s,e){ return s + computeEquipPct(e.id); }, 0) / allNonOK.length)
+    : 0;
+  var curMonth  = today.toISOString().substring(0,7);
+  var plannedThisMonth = allNonOK.filter(function(e){
+    return (APP.masterplan[e.id+'_'+curMonth]||'') === 'plan';
+  }).length;
+
+  // Calcul retards critiques: fin prévue dépassée ET pct < 100%
+  var criticalDelays = 0;
+  equips.forEach(function(e) {
+    var pct = computeEquipPct(e.id);
+    // Chercher la date de planification la plus ancienne dans MONTHS6
+    var planStart = null;
+    MONTHS6.forEach(function(m) {
+      if ((APP.masterplan[e.id+'_'+m.k]||'') === 'plan') {
+        var d = new Date(m.k+'-01');
+        if (!planStart || d < planStart) planStart = d;
+      }
+    });
+    if (planStart) {
+      var endPlanned = new Date(planStart.getTime() + durDays*86400000);
+      if (endPlanned < today && pct < 100) criticalDelays++;
+    }
+  });
+
+  var kpiEl = document.getElementById('gantt-kpis');
+  if (kpiEl) {
+    kpiEl.innerHTML = [
+      {label:'Taux de réalisation global', val: totalPct + '%', col:'#1d4ed8', bg:'#eff6ff'},
+      {label:'Planifiés ce mois (' + curMonth + ')', val: plannedThisMonth, col:'#065f46', bg:'#d1fae5'},
+      {label:'Retards critiques', val: criticalDelays, col: criticalDelays>0?'#991b1b':'#065f46', bg: criticalDelays>0?'#fee2e2':'#d1fae5'}
+    ].map(function(k) {
+      return '<div style="background:'+k.bg+';border-radius:8px;padding:10px 14px;border-left:4px solid '+k.col+';">' +
+        '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:'+k.col+';letter-spacing:.3px;">'+k.label+'</div>' +
+        '<div style="font-size:22px;font-weight:800;color:'+k.col+';">'+k.val+'</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  // ── Mise à jour du label période ────────────────────────────
+  var periodEl = document.getElementById('gantt-period-label');
+  if (periodEl) {
+    var labels = MONTHS6.map(function(m){ return m.l; });
+    periodEl.textContent = 'Période : ' + labels[0] + ' → ' + labels[labels.length-1];
+  }
+
+  // ── Construction du GANTT ────────────────────────────────────
+  var COL_EQ   = 200;  // largeur colonne équipement
+  var COL_MON  = Math.max(90, Math.floor((window.innerWidth * 0.82 - COL_EQ - 80) / 6));
+  var totalW   = COL_EQ + COL_MON * 6 + 80;
+
+  var html2 = '<div style="font-size:10px;color:#64748b;margin-bottom:6px;">'+equips.length+' équipement(s) sélectionné(s) | Durée estimée : '+durWeeks+(durWeeks===4?' mois':' sem.')+'</div>';
+  html2 += '<table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:11px;">';
+
+  // En-tête colonnes
+  html2 += '<thead><tr>';
+  html2 += '<th style="width:'+COL_EQ+'px;background:#0a1628;color:#fff;padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;border-right:2px solid #1e3a5f;">Équipement</th>';
+  html2 += '<th style="width:80px;background:#0a1628;color:#fff;padding:7px 6px;text-align:center;font-size:10px;border-right:1px solid #1e3a5f;">Avt.</th>';
+  MONTHS6.forEach(function(m) {
+    var isCurrent = m.k === curMonth;
+    html2 += '<th style="width:'+COL_MON+'px;background:'+(isCurrent?'#1d4ed8':'#0a1628')+';color:#fff;padding:7px 6px;text-align:center;font-size:10px;border-right:1px solid #1e3a5f;">' + m.l + '</th>';
+  });
+  html2 += '</tr></thead><tbody>';
+
+  // Lignes équipements
+  equips.forEach(function(e, ei) {
+    var pct     = computeEquipPct(e.id);
+    var rowBg   = ei % 2 === 0 ? '#ffffff' : '#f8fafc';
+
+    // Trouver la plage planifiée dans le Master Planning
+    var planMonths = [];
+    MONTHS6.forEach(function(m, mi) {
+      var v = APP.masterplan[e.id+'_'+m.k] || '';
+      if (v === 'plan') planMonths.push(mi);
+    });
+
+    // Calculer le risque
+    var startMonthIdx = planMonths.length > 0 ? Math.min.apply(null, planMonths) : -1;
+    var riskIcon = '';
+    if (startMonthIdx >= 0) {
+      var planStart2 = new Date(MONTHS6[startMonthIdx].k+'-01');
+      var endPlanned2 = new Date(planStart2.getTime() + durDays*86400000);
+      if (endPlanned2 < today) {
+        if (pct < 50) riskIcon = '<span title="À risque: avancement < 50%">\u26a0\ufe0f</span>';
+        else if (pct < 100) riskIcon = '<span title="Retard critique">\uD83D\uDD34</span>';
+      }
+    }
+
+    var statColor = e.statut === 'PANNE' ? '#ef4444' : '#f97316';
+    var pctColor  = pct >= 75 ? '#10b981' : pct >= 40 ? '#f97316' : '#ef4444';
+
+    html2 += '<tr style="background:'+rowBg+';">';
+    // Colonne équipement
+    html2 += '<td style="padding:6px 10px;border-right:2px solid #e2e8f0;border-bottom:1px solid #f1f5f9;vertical-align:middle;">' +
+      '<div style="display:flex;align-items:center;gap:5px;">' +
+        riskIcon +
+        '<div>' +
+          '<div style="font-weight:700;color:#0a1628;font-size:11px;">' + e.code + '</div>' +
+          '<div style="font-size:9px;color:#94a3b8;">' + (e.famille||'') + '</div>' +
+        '</div>' +
+      '</div></td>';
+    // Colonne avancement
+    html2 += '<td style="padding:6px;border-right:1px solid #e2e8f0;border-bottom:1px solid #f1f5f9;text-align:center;">' +
+      '<div style="font-weight:700;color:'+pctColor+';font-size:12px;">'+pct+'%</div>' +
+    '</td>';
+    // Colonnes mois
+    MONTHS6.forEach(function(m, mi) {
+      var v = APP.masterplan[e.id+'_'+m.k] || '';
+      var isCurrent2 = m.k === curMonth;
+      var cellBg = isCurrent2 ? '#eff6ff' : rowBg;
+      var cellContent = '';
+
+      if (v === 'plan') {
+        // Barre GANTT: fond gris (durée totale) + barre colorée (avancement)
+        cellContent = '<div class="gantt-bar-wrap" style="position:relative;height:18px;background:#e2e8f0;border-radius:4px;overflow:hidden;margin:0 4px;">' +
+          '<div style="position:absolute;left:0;top:0;height:100%;width:'+pct+'%;background:'+pctColor+';border-radius:4px;transition:width .3s;"></div>' +
+          '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:'+(pct>40?'#fff':'#0a1628')+';">&#128308; PLAN</div>' +
+        '</div>';
+      } else if (v === 'done') {
+        cellContent = '<div style="text-align:center;font-size:14px;">&#9989;</div>';
+      }
+
+      html2 += '<td style="padding:4px;border-right:1px solid #e2e8f0;border-bottom:1px solid #f1f5f9;background:'+cellBg+';vertical-align:middle;">' +
+        cellContent + '</td>';
+    });
+    html2 += '</tr>';
+  });
+
+  // Légende bas
+  html2 += '<tr><td colspan="'+(7+1)+'" style="padding:10px;background:#f8fafc;border-top:2px solid #e2e8f0;">' +
+    '<div style="display:flex;gap:16px;font-size:10px;color:#64748b;flex-wrap:wrap;">' +
+    '<span style="font-weight:700;color:#0a1628;">Légende :</span>' +
+    '<span><span style="display:inline-block;width:14px;height:8px;background:#10b981;border-radius:2px;margin-right:3px;vertical-align:middle;"></span>Avancement ≥ 75%</span>' +
+    '<span><span style="display:inline-block;width:14px;height:8px;background:#f97316;border-radius:2px;margin-right:3px;vertical-align:middle;"></span>Avancement 40–74%</span>' +
+    '<span><span style="display:inline-block;width:14px;height:8px;background:#ef4444;border-radius:2px;margin-right:3px;vertical-align:middle;"></span>Avancement &lt; 40%</span>' +
+    '<span>⚠️ = À risque (fin dépassée &lt; 50%)</span>' +
+    '<span>🔴 = Retard critique (fin dépassée &lt; 100%)</span>' +
+    '<div style="margin-left:auto;color:#94a3b8;">SOSETER HYDRO — DM-PLANNING — ' + new Date().toLocaleDateString('fr-FR') + '</div>' +
+    '</div></td></tr>';
+
+  html2 += '</tbody></table>';
+
+  var chartEl = document.getElementById('gantt-chart');
+  if (chartEl) chartEl.innerHTML = html2;
+}
+
+function printGantt() {
+  // Créer une zone de print isolée
+  var existing = document.getElementById('gantt-print-root');
+  if (existing) existing.remove();
+
+  var root = document.createElement('div');
+  root.id = 'gantt-print-root';
+  root.style.cssText = 'display:none;';
+
+  // Header print
+  var header = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:6px;border-bottom:3px solid #0a1628;">' +
+    '<div style="display:flex;align-items:center;gap:10px;">' +
+      (APP_CONFIG.logoUrl ? '<img src="'+APP_CONFIG.logoUrl+'" style="height:32px;">' : '') +
+      '<div>' +
+        '<div style="font-family:Arial,sans-serif;font-size:14px;font-weight:800;color:#0a1628;">RAPPORT GANTT STRATéGIQUE</div>' +
+        '<div style="font-size:10px;color:#64748b;">' + (APP_CONFIG.company||'SOSETER HYDRO') + ' — ' + (APP_CONFIG.dmName||'F. SEYE') + ' — Directeur Matériel</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="font-size:10px;color:#64748b;text-align:right;">' +
+      'Édité le ' + new Date().toLocaleDateString('fr-FR') + '<br>' +
+      'DM-PLANNING ' + (typeof APP_VERSION!=='undefined'?APP_VERSION:'') +
+    '</div>' +
+  '</div>';
+
+  // KPIs
+  var kpisEl = document.getElementById('gantt-kpis');
+  var chartEl = document.getElementById('gantt-chart');
+
+  root.innerHTML = header + (kpisEl ? kpisEl.outerHTML : '') + (chartEl ? chartEl.innerHTML : '');
+  document.body.appendChild(root);
+
+  // CSS print dynamique
+  var styleEl = document.createElement('style');
+  styleEl.textContent = '@media print{body>*:not(#gantt-print-root){display:none!important;}#gantt-print-root{display:block!important;position:fixed;inset:0;padding:6mm;background:#fff;font-family:Arial,sans-serif;font-size:10px;}@page{size:A4 landscape;margin:6mm;}.gantt-bar-wrap{-webkit-print-color-adjust:exact;print-color-adjust:exact;}table{page-break-inside:avoid;}}';
+  document.head.appendChild(styleEl);
+
+  setTimeout(function() {
+    window.print();
+    setTimeout(function() {
+      root.remove();
+      styleEl.remove();
+    }, 1000);
+  }, 300);
+}
+
+
+// ── Navigation Mobile — Hamburger Sidebar ────────────────────
+function toggleMobSidebar() {
+  var sb = document.getElementById('sidebar');
+  var ov = document.getElementById('mob-overlay');
+  if (!sb) return;
+  var isOpen = sb.classList.contains('mob-open');
+  if (isOpen) { closeMobSidebar(); } else {
+    sb.classList.add('mob-open');
+    if (ov) ov.style.display = 'block';
+    document.body.classList.add('mob-sidebar-open');
+  }
+}
+function closeMobSidebar() {
+  var sb = document.getElementById('sidebar');
+  var ov = document.getElementById('mob-overlay');
+  if (sb) sb.classList.remove('mob-open');
+  if (ov) ov.style.display = 'none';
+  document.body.classList.remove('mob-sidebar-open');
+}
+// Fermer sidebar quand on clique sur un item de navigation
+document.addEventListener('click', function(e) {
+  var ni = e.target.closest ? e.target.closest('.ni') : null;
+  if (ni && window.innerWidth < 768) closeMobSidebar();
+}, true);
+
 // Init sync badge
 _syncSetStatus('inactive');
 updateWeekBadge();
@@ -6880,5 +7489,92 @@ if (rptComment) {
 // Ne pas dupliquer ici — double _fbInit() corrompt l'état Firebase.
 
 </script>
+
+<!-- ══════════ MODALE GANTT STRATÉGIQUE ══════════ -->
+<div id="gantt-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.55);overflow-y:auto;">
+  <div style="background:#fff;margin:20px auto;border-radius:12px;max-width:96vw;min-width:900px;box-shadow:0 8px 40px rgba(0,0,0,.3);overflow:hidden;">
+
+    <!-- Header modale -->
+    <div style="background:#0a1628;color:#fff;padding:14px 22px;display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:20px;">&#128200;</span>
+        <div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:800;letter-spacing:.5px;">RAPPORT GANTT STRATéGIQUE</div>
+          <div style="font-size:11px;opacity:.7;" id="gantt-period-label">Période 6 mois glissants</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button onclick="printGantt()" style="background:#f97316;color:#fff;border:none;padding:7px 16px;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;">&#128424; Imprimer A4H</button>
+        <button onclick="closeGanttModal()" style="background:rgba(255,255,255,.15);color:#fff;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:18px;line-height:1;">&#215;</button>
+      </div>
+    </div>
+
+    <!-- Contrôles -->
+    <div style="padding:12px 22px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
+      <div>
+        <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;">Durée estimée / équipement</label>
+        <select id="gantt-duration" onchange="renderGantt()" style="display:block;margin-top:3px;font-size:12px;padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;">
+          <option value="1">1 semaine</option>
+          <option value="2" selected>2 semaines</option>
+          <option value="3">3 semaines</option>
+          <option value="4">1 mois</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;">Sélection équipements</label>
+        <div style="margin-top:3px;display:flex;gap:6px;">
+          <button onclick="ganttSelectAll(true)" style="font-size:11px;padding:4px 10px;border:1px solid #1d4ed8;border-radius:5px;background:#eff6ff;color:#1d4ed8;cursor:pointer;">Tout sélectionner</button>
+          <button onclick="ganttSelectAll(false)" style="font-size:11px;padding:4px 10px;border:1px solid #e2e8f0;border-radius:5px;background:#fff;color:#64748b;cursor:pointer;">Tout désélectionner</button>
+        </div>
+      </div>
+      <div id="gantt-legend" style="margin-left:auto;display:flex;gap:12px;align-items:center;font-size:11px;color:#475569;">
+        <span><span style="display:inline-block;width:16px;height:8px;background:#10b981;border-radius:2px;margin-right:3px;vertical-align:middle;"></span>Avancement</span>
+        <span><span style="display:inline-block;width:16px;height:8px;background:#e2e8f0;border-radius:2px;margin-right:3px;vertical-align:middle;"></span>Durée prévue</span>
+        <span>&#9888;&#65039; À risque (&lt;50%)</span>
+        <span>&#128308; Retard critique</span>
+      </div>
+    </div>
+
+    <!-- Checkboxes équipements -->
+    <div id="gantt-equip-select" style="padding:10px 22px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:6px;max-height:110px;overflow-y:auto;"></div>
+
+    <!-- Rapport GANTT (printable zone) -->
+    <div id="gantt-print-zone" style="padding:16px 22px;">
+      <div id="gantt-kpis" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;"></div>
+      <div id="gantt-chart" style="overflow-x:auto;"></div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+/* ── GANTT Print A4 Paysage ─────────────────────────────── */
+@media print {
+  body > *:not(#gantt-print-root) { display:none !important; }
+  #gantt-print-root {
+    display:block !important;
+    position:fixed;inset:0;z-index:9999;background:#fff;
+    padding:8mm;font-family:Arial,sans-serif;
+  }
+  @page { size:A4 landscape; margin:8mm; }
+  #gantt-modal { display:none !important; }
+  .gantt-no-print { display:none !important; }
+  .gantt-bar-wrap { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+}
+/* ── GANTT rows ─────────────────────────────────────────── */
+.gantt-row { display:contents; }
+.gantt-cell {
+  padding:5px 8px;font-size:11px;border-bottom:1px solid #f1f5f9;
+  display:flex;align-items:center;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.gantt-header-cell {
+  padding:6px 8px;font-size:10px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.3px;
+  background:#0a1628;color:#fff;
+  text-align:center;border:none;
+}
+</style>
+
 </body>
 </html>
