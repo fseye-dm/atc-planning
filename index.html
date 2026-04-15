@@ -3723,6 +3723,54 @@ if (!APP.planning.weekKey) APP.planning.weekKey = null;
 if (!APP.planning.rptComment) APP.planning.rptComment = '';
 if (!APP.fieldTs) APP.fieldTs = {};
 
+
+// ════════════════════════════════════════════════════════════════
+// PRIORITY_FIELDS — Tableau de tous les champs synchronisés
+// Format : ['clé priorityRules', 'Label UI', 'Module', 'editBy']
+// editBy : 'both' | 'dm_only' | 'chef_only'
+// ════════════════════════════════════════════════════════════════
+var PRIORITY_FIELDS = [
+  // ── Équipements ───────────────────────────────────────────
+  ['equip.statut',        'Statut (OK / PANNE / IMMOBILISÉ)',     'Équipements',      'both'],
+  ['equip.pieces',        'Disponibilité pièces',                  'Équipements',      'both'],
+  ['equip.priority',      'Priorité opérationnelle (1–5)',         'Ordonnancement',   'both'],
+  ['equip.desc',          'Description / Travaux à réaliser',      'Équipements',      'dm_only'],
+  ['equip.create',        'Créer un équipement',                   'Équipements',      'dm_only'],
+  ['equip.delete',        'Supprimer un équipement',               'Équipements',      'dm_only'],
+  // ── Planning Hebdo ────────────────────────────────────────
+  ['plan.included',       'Sélection Top 10 (équipements planifiés)', 'Planning Hebdo', 'dm_only'],
+  ['plan.agent',          'Agent affecté (saisie Chef)',            'Planning Hebdo',   'chef_only'],
+  ['plan.realisation',    '% de réalisation',                      'Planning Hebdo',   'chef_only'],
+  ['plan.commentaire',    'Commentaire terrain',                    'Planning Hebdo',   'chef_only'],
+  ['plan.pieces',         'Confirmation pièces terrain',           'Planning Hebdo',   'chef_only'],
+  ['plan.generateTop10',  'Génération automatique du Top 10',      'Planning Hebdo',   'dm_only'],
+  ['plan.frozen',         'Figer un équipement (frozen)',          'Planning Hebdo',   'dm_only'],
+  ['plan.rptComment',     'Commentaire rapport hebdo (Chef)',       'Rapport Hebdo',    'chef_only'],
+  // ── Master Planning ───────────────────────────────────────
+  ['mp.cell',             'Cellule P / ✓ Master Planning',         'Master Planning',  'dm_only'],
+  ['masterplanLocked',    'Verrouillage du plan',                  'Master Planning',  'dm_only'],
+  // ── Instructions DM ───────────────────────────────────────
+  ['dm.text',             'Texte de l\'instruction',               'Instructions DM',  'dm_only'],
+  ['dm.priority',         'Priorité de l\'instruction',            'Instructions DM',  'dm_only'],
+  ['dm.dest',             'Destinataire de l\'instruction',        'Instructions DM',  'dm_only'],
+  ['dm.executed',         'Validation / Exécution',                'Instructions DM',  'both'],
+  ['dm.comment',          'Commentaire de retour (Chef)',          'Instructions DM',  'chef_only'],
+  ['dm.deleteInstruction','Suppression d\'une instruction',        'Instructions DM',  'dm_only'],
+  // ── Personnel / RH ────────────────────────────────────────
+  ['agent.actif',         'Agent actif / inactif',                 'Personnel / RH',   'both'],
+  ['agent.heures',        'Heures journalières',                   'Personnel / RH',   'dm_only'],
+  ['agent.supp',          'Heures supplémentaires',               'Personnel / RH',   'both'],
+  ['agent.metier',        'Métier de l\'agent',                    'Personnel / RH',   'dm_only'],
+  ['agent.deleted',       'Suppression définitive d\'un agent',   'Personnel / RH',   'dm_only'],
+  // ── Suivi des Tâches ──────────────────────────────────────
+  ['suivi.done',          'Validation d\'une tâche (✅)',           'Suivi des Tâches', 'chef_only'],
+  ['suivi.rh',            'Affectation RH sur une tâche',          'Suivi des Tâches', 'chef_only'],
+  ['suivi.addTask',       'Création d\'une tâche',                 'Suivi des Tâches', 'chef_only'],
+  ['suivi.deleteTask',    'Suppression d\'une tâche',              'Suivi des Tâches', 'chef_only'],
+  // ── Ordonnancement ────────────────────────────────────────
+  ['ord.criteriaOrder',   'Ordre des critères de tri',             'Ordonnancement',   'dm_only'],
+];
+
 // ── Règles de priorité configurables (Admin → Règles de Priorité) ──
 // Structure: { 'equip.statut': 'chef', 'equip.priority': 'dm', ... }
 // 'chef' = Chef prioritaire en cas de conflit
