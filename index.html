@@ -1077,7 +1077,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v17.1';
+var APP_VERSION = 'v17.2';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1339,6 +1339,7 @@ function _syncPayload() {
     suiviTaches: APP.suiviTaches || {},
     pw:          APP.pw,
     _deletedAgentIds: APP._deletedAgentIds || [],
+    _deletedEquipIds: APP._deletedEquipIds || [],
     priorityRules: APP.priorityRules || {}
   });
 }
@@ -1535,8 +1536,12 @@ function _syncMerge(remote) {
         var eid = le.code || le.id;
         // Propagation du soft delete : priorité Chef sur suppression
         if (re.deleted && !le.deleted) {
-          var winner = (APP.priorityRules && APP.priorityRules['equip.deleted']) || 'chef';
-          if (remote._by === winner || re.deletedBy === winner) {
+          // Propager la suppression selon la règle equip.deleted (défaut: dm)
+          var delWinner = (APP.priorityRules && APP.priorityRules['equip.deleted']) || 'dm';
+          var remDelTs  = (rFieldTs['equip.' + eid + '.deleted'] || rFieldTs['equip.deleted'] || 0);
+          var locDelTs  = (lFieldTs['equip.' + eid + '.deleted'] || lFieldTs['equip.deleted'] || 0);
+          // Appliquer si : le distant est le winner OU son timestamp est plus récent
+          if (remote._by === delWinner || re.deletedBy === delWinner || remDelTs > locDelTs) {
             le.deleted   = true;
             le.deletedAt = re.deletedAt;
             le.deletedBy = re.deletedBy;
@@ -1544,7 +1549,13 @@ function _syncMerge(remote) {
             mergeLog.push('Équipement supprimé (sync) : ' + eid);
           }
         } else if (!re.deleted && le.deleted) {
-          // Rien — le local a supprimé → préserver la suppression locale
+          // Restaurer si le distant (winner) l'indique explicitement
+          var restWinner = (APP.priorityRules && APP.priorityRules['equip.deleted']) || 'dm';
+          if (remote._by === restWinner) {
+            // Le winner dit "non supprimé" → restaurer
+            le.deleted = false; le.deletedAt = null; le.deletedBy = null; changed = true;
+          }
+          // Sinon : le local a supprimé → préserver la suppression locale
         } else if (!re.deleted) {
           applyField(le, 'statut',    re.statut,    'equip.statut',    'Statut ' + eid,       eid);
           applyField(le, 'priority',  re.priority,  'equip.priority',  'Priorité ' + eid,     eid);
@@ -1748,7 +1759,23 @@ function _syncMerge(remote) {
   // ══════════════════════════════════════════════════════════
   // 7. AGENTS — règles configurables
   // ══════════════════════════════════════════════════════════
-  // Fusionner la liste noire des agents supprimés (depuis Firebase)
+  // Fusionner la liste noire des ÉQUIPEMENTS supprimés (depuis Firebase)
+  if (remote._deletedEquipIds && Array.isArray(remote._deletedEquipIds)) {
+    if (!APP._deletedEquipIds) APP._deletedEquipIds = [];
+    remote._deletedEquipIds.forEach(function(did) {
+      if (APP._deletedEquipIds.indexOf(did) === -1) APP._deletedEquipIds.push(did);
+    });
+    // Marquer ces équipements comme supprimés localement
+    APP.equips.forEach(function(e) {
+      if (APP._deletedEquipIds.indexOf(e.id) > -1 && !e.deleted) {
+        e.deleted = true;
+        e.deletedAt = e.deletedAt || Date.now();
+        changed = true;
+      }
+    });
+  }
+
+  // Fusionner la liste noire des AGENTS supprimés (depuis Firebase)
   if (remote._deletedAgentIds && Array.isArray(remote._deletedAgentIds)) {
     if (!APP._deletedAgentIds) APP._deletedAgentIds = [];
     remote._deletedAgentIds.forEach(function(did) {
@@ -2661,7 +2688,27 @@ function _fbStartSync(role) {
   _fbSilentUploadOffline();
 
   // ── Lire une fois au démarrage (Single Source of Truth) ───
-  // D'abord lire les agents supprimés pour les bloquer avant le merge
+  // D'abord lire les équipements ET agents supprimés pour les bloquer avant le merge
+  _fbDB.ref('atcdata/_deletedEquips').once('value').then(function(eqSnap) {
+    var deletedEquips = eqSnap.val();
+    if (deletedEquips) {
+      if (!APP._deletedEquipIds) APP._deletedEquipIds = [];
+      Object.keys(deletedEquips).forEach(function(k) {
+        var entry = deletedEquips[k];
+        var eid = entry.id || k;
+        if (APP._deletedEquipIds.indexOf(eid) === -1) APP._deletedEquipIds.push(eid);
+      });
+      // Marquer ces équipements comme supprimés localement
+      APP.equips.forEach(function(e) {
+        if (APP._deletedEquipIds.indexOf(e.id) > -1) {
+          e.deleted = true;
+        }
+      });
+      console.log('Firebase: équipements supprimés chargés:', APP._deletedEquipIds.length);
+    }
+  }).catch(function(e){ console.warn('Firebase _deletedEquips:', e.message); });
+
+  // Lire les agents supprimés pour les bloquer avant le merge
   _fbDB.ref('atcdata/_deletedAgents').once('value').then(function(dSnap) {
     var deletedAgents = dSnap.val();
     if (deletedAgents) {
@@ -3848,6 +3895,7 @@ if (!APP.priorityRules) {
     'equip.anomalies':       'chef',
     'equip.create':          'dm',    // Seul le DM crée un équipement
     'equip.delete':          'dm',    // Seul le DM supprime un équipement
+    'equip.deleted':         'dm',    // Soft-delete propagé par le DM
     // ── Ordonnancement ──────────────────────────────────────────
     'ord.criteriaOrder':     'dm',    // DM définit l'ordre des critères
     'ord.priority':          'dm',
@@ -4403,7 +4451,7 @@ function resetPriorityRules() {
   // Forcer la réinitialisation
   APP.priorityRules = {
     'equip.statut':'chef','equip.pieces':'chef','equip.priority':'dm',
-    'equip.desc':'dm','equip.anomalies':'chef','equip.create':'dm','equip.delete':'dm',
+    'equip.desc':'dm','equip.anomalies':'chef','equip.create':'dm','equip.delete':'dm','equip.deleted':'dm',
     'ord.criteriaOrder':'dm','ord.priority':'dm','ord.pieces':'chef',
     'plan.included':'dm','plan.generateTop10':'dm','plan.frozen':'dm',
     'plan.agent':'chef','plan.realisation':'chef','plan.commentaire':'chef',
@@ -5500,8 +5548,8 @@ function renderDash() {
   // KPI V7: Taux equipements en Retard - conditions renforcees: date depassee + statut != OK + avancement < 100%
   var today = new Date();
   var lateCount = 0;
-  APP.equips.forEach(function(e) {
-    if (e.statut === 'OK') return; // V7: exclude OK equipment
+  _activeEquips().forEach(function(e) {  // _activeEquips() filtre e.deleted=true
+    if (e.statut === 'OK') return;
     var hasPassedPlan = false;
     MONTHS6.forEach(function(m) {
       var key = e.id + '_' + m.k;
@@ -6782,9 +6830,19 @@ function delEquip(id) {
   if (!confirm('Supprimer cet équipement ?')) return;
   var e = APP.equips.find(function(eq) { return eq.id === id; });
   if (e) {
-    // Soft delete : marquer comme supprimé avec timestamp pour la sync
-    // L'équipement disparaît de l'UI mais reste dans le JSON pour se propager
-    e.deleted = true;
+    // 1. Ajouter à la liste noire persistante (identique aux agents)
+    if (!APP._deletedEquipIds) APP._deletedEquipIds = [];
+    if (APP._deletedEquipIds.indexOf(id) === -1) APP._deletedEquipIds.push(id);
+
+    // 2. Écrire le flag deleted dans Firebase /atcdata/_deletedEquips
+    if (_fbReady && _fbDB) {
+      _fbDB.ref('atcdata/_deletedEquips/' + sanitizeKey(id)).set({
+        id: id, code: e.code, deletedAt: Date.now(), deletedBy: ROLE
+      });
+    }
+
+    // 3. Soft-delete avec timestamp
+    e.deleted   = true;
     e.deletedAt = Date.now();
     e.deletedBy = ROLE;
     _stampField('equip.' + (e.code || id) + '.deleted');
@@ -6793,14 +6851,25 @@ function delEquip(id) {
   saveApp();
   if (_fbReady && _fbDB) _fbWriteToCloud();
   filterEq();
+  toast('\u2705 Équipement supprimé et synchronisé.');
 }
 
 // Nettoyer les équipements supprimés du JSON après 7 jours (appel périodique)
 function _purgeSoftDeleted() {
   var limit = Date.now() - 7 * 24 * 3600 * 1000; // 7 jours
+
+  // Alimenter la liste noire avec tous les équipements soft-deleted récents
+  if (!APP._deletedEquipIds) APP._deletedEquipIds = [];
+  APP.equips.forEach(function(e) {
+    if (e.deleted && APP._deletedEquipIds.indexOf(e.id) === -1) {
+      APP._deletedEquipIds.push(e.id);
+    }
+  });
+
+  // Purger uniquement les très anciens (> 7 jours) — conserver les récents pour propagation
   var before = APP.equips.length;
   APP.equips = APP.equips.filter(function(e) {
-    return !e.deleted || e.deletedAt > limit;
+    return !e.deleted || !e.deletedAt || e.deletedAt > limit;
   });
   if (APP.equips.length !== before) saveApp();
 }
@@ -7848,11 +7917,21 @@ function chefResetFromFirebase() {
     if (remote._fieldTs)    APP.fieldTs      = remote._fieldTs;
     if (typeof remote.masterplanLocked === 'boolean') APP.masterplanLocked = remote.masterplanLocked;
     if (remote._deletedAgentIds) APP._deletedAgentIds = remote._deletedAgentIds;
+    if (remote._deletedEquipIds) APP._deletedEquipIds = remote._deletedEquipIds;
 
     // Filtrer les agents supprimés
     if (APP._deletedAgentIds && APP._deletedAgentIds.length) {
       APP.agents = APP.agents.filter(function(a) {
         return APP._deletedAgentIds.indexOf(a.id) === -1;
+      });
+    }
+
+    // Marquer les équipements supprimés
+    if (APP._deletedEquipIds && APP._deletedEquipIds.length) {
+      APP.equips.forEach(function(e) {
+        if (APP._deletedEquipIds.indexOf(e.id) > -1) {
+          e.deleted = true;
+        }
       });
     }
 
