@@ -1077,7 +1077,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v17.2';
+var APP_VERSION = 'v17.3';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -2246,6 +2246,113 @@ function _fbInit() {
   }
 } // <--- CETTE ACCOLADE FERME _fbInit()
 
+// ════════════════════════════════════════════════════════════════
+// _fbOnSignedIn — appelée par onAuthStateChanged après Google Auth
+// Gère : détection rôle, lecture Firebase, listener temps réel
+// ════════════════════════════════════════════════════════════════
+function _fbOnSignedIn(user) {
+  var email = user.email || '';
+  var role = FIREBASE_AUTH_EMAILS[email];
+
+  // Fallback : chercher avec sanitizeKey (email avec . remplacé par _)
+  if (!role) {
+    var sanitized = sanitizeKey(email);
+    Object.keys(FIREBASE_AUTH_EMAILS).forEach(function(k) {
+      if (sanitizeKey(k) === sanitized) role = FIREBASE_AUTH_EMAILS[k];
+    });
+  }
+
+  if (!role) {
+    _fbShowInfo('\u26d4 Compte non autoris\u00e9 : ' + email, 'err');
+    _fbAuth.signOut();
+    return;
+  }
+
+  _fbReady = true;
+  console.log('Firebase: authentifi\u00e9 en tant que [' + role + '] — ' + email);
+
+  // ── Étape 1 : Lire les suppressions avant le merge ──────────
+  // Équipements supprimés
+  _fbDB.ref('atcdata/_deletedEquips').once('value').then(function(snap) {
+    var data = snap.val();
+    if (data) {
+      if (!APP._deletedEquipIds) APP._deletedEquipIds = [];
+      Object.keys(data).forEach(function(k) {
+        var eid = (data[k].id) || k;
+        if (APP._deletedEquipIds.indexOf(eid) === -1) APP._deletedEquipIds.push(eid);
+      });
+      APP.equips.forEach(function(e) {
+        if (APP._deletedEquipIds.indexOf(e.id) > -1) e.deleted = true;
+      });
+      console.log('Firebase: \u00e9quipements supprim\u00e9s charg\u00e9s :', APP._deletedEquipIds.length);
+    }
+  }).catch(function() {});
+
+  // Agents supprimés
+  _fbDB.ref('atcdata/_deletedAgents').once('value').then(function(snap) {
+    var data = snap.val();
+    if (data) {
+      if (!APP._deletedAgentIds) APP._deletedAgentIds = [];
+      Object.keys(data).forEach(function(k) {
+        var entry = data[k]; var aid = entry.id || k;
+        if (APP._deletedAgentIds.indexOf(aid) === -1) APP._deletedAgentIds.push(aid);
+      });
+      APP.agents = APP.agents.filter(function(a) {
+        return APP._deletedAgentIds.indexOf(a.id) === -1;
+      });
+      console.log('Firebase: agents supprim\u00e9s charg\u00e9s :', APP._deletedAgentIds.length);
+    }
+  }).catch(function() {});
+
+  // ── Étape 2 : Lecture initiale complète ─────────────────────
+  _fbDB.ref('atcdata').once('value').then(function(snap) {
+    var remote = snap.val();
+    if (remote && typeof remote === 'object') {
+      var remTs = new Date(remote._ts || 0).toLocaleTimeString('fr-FR');
+      console.log('Firebase: donn\u00e9es charg\u00e9es depuis ' + (remote._by||'?') + ' (' + remTs + ')');
+      try {
+        _syncMerge(remote);
+        _saveLocalOnly();
+        autoRefreshUI();
+      } catch(e) { console.error('Firebase merge d\u00e9marrage:', e); }
+    } else {
+      console.log('Firebase: base vide \u2014 initialisation avec donn\u00e9es locales');
+      _fbWriteToCloud();
+    }
+  }).catch(function(e) { console.error('Firebase read:', e); });
+
+  // ── Étape 3 : Listener temps réel sur _ts ───────────────────
+  _fbDB.ref('atcdata/_ts').on('value', function(snap) {
+    var remoteTs = snap.val() || 0;
+    if (remoteTs > SYNC._fbLastWriteTs + 800) {
+      // Le timestamp distant est plus récent → lire et merger
+      _fbDB.ref('atcdata').once('value').then(function(fullSnap) {
+        var remote = fullSnap.val();
+        if (!remote) return;
+        if (remote._by === ROLE) return; // notre propre écriture — ignorer
+        try {
+          var changed = _syncMerge(remote);
+          if (changed) {
+            _saveLocalOnly();
+            autoRefreshUI();
+            console.log('Firebase: sync temps r\u00e9el re\u00e7ue depuis ' + (remote._by||'?'));
+          }
+        } catch(e) { console.error('Firebase sync:', e); }
+      });
+    }
+  }, function(err) {
+    console.error('Firebase _ts listener:', err.code, err.message);
+  });
+
+  // ── Étape 4 : Appliquer le login ────────────────────────────
+  _applyLogin(role, true);
+}
+
+function _fbOnSignedOut() {
+  _fbReady = false;
+  console.log('Firebase: d\u00e9connect\u00e9');
+}
+
 // --- FONCTIONS DE GESTION ---
 
 
@@ -2392,490 +2499,35 @@ function _fbPushNow() {
     return;
   }
   var status = document.getElementById('cfg-save-status');
-  if (status) status.innerHTML = '\u23f3 Envoi en cours...';
+  if (status) status.innerHTML = '\u23f3 Envoi complet en cours...';
   try {
-    var rawPayload = JSON.parse(_syncPayload());
-    // V\u00e9rification: agents pr\u00e9sents?
-    var agentCount = rawPayload.agents ? rawPayload.agents.length : 0;
-    var equipCount = rawPayload.equips ? rawPayload.equips.length : 0;
-    // Nettoyer les cl\u00e9s
-    var payload = JSON.parse(JSON.stringify(rawPayload, function(key, value) {
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        var rep = {};
-        for (var k in value) { rep[sanitizeKey(k)] = value[k]; }
-        return rep;
-      }
-      return value;
-    }));
-    SYNC._fbLastWriteTs = payload._ts || 0;
-    _fbDB.ref('atcdata').set(payload).then(function() {
-      _fbSetCloudBadge('ok', '\u2601 Synchronis\u00e9');
-      try { localStorage.removeItem(SK + '_offline_pending'); } catch(e) {}
-      var msg = '\u2601 Firebase mis \u00e0 jour : ' + equipCount + ' \u00e9quipements, ' + agentCount + ' agents.';
-      if (status) status.innerHTML = '<span style="color:#10b981;">' + msg + '</span>';
+    var ts = Date.now();
+    var equipCount = (APP.equips||[]).filter(function(e){return !e.deleted;}).length;
+    var agentCount = (APP.agents||[]).length;
+    var fullPayload = _sanitizeObj({
+      _by: ROLE, _ts: ts, _v: 'v8',
+      _fieldTs: APP.fieldTs||{}, _sections: SYNC._sectionTs||{},
+      _deletedAgentIds: APP._deletedAgentIds||[], _deletedEquipIds: APP._deletedEquipIds||[],
+      equips: APP.equips||[], agents: APP.agents||[], dm_inst: APP.dm||[],
+      urg: APP.urg||[], hist: APP.hist||[], planning: APP.planning||{},
+      masterplan: APP.masterplan||{}, masterplanLocked: APP.masterplanLocked||false,
+      taches: APP.taches||[], tacheTypes: APP.tacheTypes||['01-MECANIQUE'],
+      suiviTaches: APP.suiviTaches||{}, pw: APP.pw||{},
+      priorityRules: APP.priorityRules||{}
+    });
+    SYNC._fbLastWriteTs = ts;
+    _fbDB.ref('atcdata').set(fullPayload).then(function() {
+      var msg = '\u2601 Firebase mis \u00e0 jour\u202f: ' + equipCount + ' \u00e9quipements, ' + agentCount + ' agents';
       toast(msg);
-      console.log('Firebase push OK — atcdata/agents:', agentCount, '| equips:', equipCount);
-    }).catch(function(err) {
-      var errMsg = '\u274c Erreur Firebase : ' + (err.code || '') + ' ' + (err.message || '');
-      if (status) status.innerHTML = '<span style="color:#ef4444;">' + errMsg + '</span>';
-      toast(errMsg);
-      console.error('Firebase push error:', err);
+      if (status) status.innerHTML = '<span style="color:#10b981;">\u2705 ' + msg + '</span>';
+      _fbSetCloudBadge('ok','\u2601 Synchronis\u00e9');
+    }).catch(function(err){
+      var m='\u274c Firebase\u202f: '+(err.code||err.message);
+      toast(m); if(status) status.innerHTML='<span style="color:#ef4444;">'+m+'</span>';
     });
-  } catch(e) {
-    console.error('Firebase push prep:', e);
-    toast('\u274c Erreur pr\u00e9paration : ' + e.message);
-  }
+  } catch(e){ toast('\u274c Erreur\u202f: '+e.message); }
 }
 
-
-// ════════════════════════════════════════════════════════════════
-// DIAGNOSTIC FIREBASE — Test complet de la liaison
-// ════════════════════════════════════════════════════════════════
-function runFirebaseDiagnostic() {
-  var panel = document.getElementById('fb-diag-results');
-  if (!panel) return;
-  panel.style.display = 'block';
-  panel.innerHTML = '<div style="color:#3b82f6;font-weight:600;">⏳ Diagnostic en cours...</div>';
-
-  var rows = [];
-  function row(ok, label, detail) {
-    rows.push({ok:ok, label:label, detail:detail||''});
-    panel.innerHTML = rows.map(function(r) {
-      return '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">' +
-        '<span style="flex-shrink:0;">' + (r.ok===true?'✅':r.ok===false?'❌':'⏳') + '</span>' +
-        '<div><strong>' + r.label + '</strong>' +
-          (r.detail ? '<br><span style="font-size:10px;color:#64748b;">' + r.detail + '</span>' : '') +
-        '</div></div>';
-    }).join('');
-  }
-
-  if (typeof firebase === 'undefined' || !firebase.apps || !firebase.apps.length) {
-    row(false, 'SDK Firebase non chargé'); return;
-  }
-  row(true, 'SDK Firebase chargé');
-
-  if (!_fbAuth) { row(false, 'Firebase Auth null'); return; }
-  row(true, 'Firebase Auth initialisé');
-
-  var user = _fbAuth.currentUser;
-  if (!user) { row(false, 'Aucun utilisateur connecté', 'Reconnectez-vous avec Google'); return; }
-  row(true, 'Utilisateur connecté', user.email);
-
-  if (!_fbDB) { row(false, 'Realtime Database null'); return; }
-  row(true, 'Realtime Database initialisée');
-
-  row(null, 'Test lecture /atcdata...', '');
-  _fbDB.ref('atcdata').once('value').then(function(snap) {
-    var val = snap.val();
-    var agCnt = val && val.agents ? val.agents.length : 0;
-    var eqCnt = val && val.equips ? val.equips.length : 0;
-    row(true, 'Lecture /atcdata OK', val ? (eqCnt + ' équipements, ' + agCnt + ' agents en base') : 'Base vide');
-
-    row(null, 'Test écriture...', '');
-    _fbDB.ref('atcdata/_diag').set({ts: Date.now(), by: ROLE||'dm'}).then(function() {
-      row(true, 'Écriture /atcdata OK');
-      _fbDB.ref('atcdata/_diag').remove();
-
-      var raw;
-      try { raw = JSON.parse(_syncPayload()); } catch(e) { row(false, 'Payload invalide', e.message); return; }
-      var aC = raw.agents ? raw.agents.length : 0;
-      var eC = raw.equips ? raw.equips.length : 0;
-      row(null, 'Écriture données réelles (' + eC + ' éq, ' + aC + ' agents)...', '');
-
-      var clean = JSON.parse(JSON.stringify(raw, function(k, v) {
-        if (v && typeof v === 'object' && !Array.isArray(v)) {
-          var rep = {}; for (var key in v) { rep[sanitizeKey(key)] = v[key]; } return rep;
-        }
-        return v;
-      }));
-
-      _fbDB.ref('atcdata').set(clean).then(function() {
-        row(true, '☁ ÉCRITURE RÉUSSIE', eC + ' équipements et ' + aC + ' agents envoyés vers Firebase.');
-        _fbSetCloudBadge('ok', '☁ Synchronisé');
-        SYNC._fbLastWriteTs = clean._ts || 0;
-        toast('☁ ' + eC + ' équipements et ' + aC + ' agents envoyés vers Firebase');
-      }).catch(function(err) {
-        row(false, 'Écriture données échouée', err.code + ' : ' + err.message);
-      });
-    }).catch(function(err) {
-      row(false, 'Écriture bloquée', err.code + ' : ' + err.message + ' — Vérifiez les règles Firebase');
-    });
-  }).catch(function(err) {
-    row(false, 'Lecture bloquée', err.code + ' : ' + err.message);
-  });
-}
-
-// ══ Admin: Sauvegarder la configuration dans Firebase /config ══
-function saveFirebaseConfig() {
-  var dmEmail   = (document.getElementById('cfg-dm-email')   || {}).value   || '';
-  var chefEmail = (document.getElementById('cfg-chef-email') || {}).value   || '';
-  var company   = (document.getElementById('cfg-company')    || {}).value   || '';
-  var dmName    = (document.getElementById('cfg-dm-name')    || {}).value   || '';
-  var chefName  = (document.getElementById('cfg-chef-name')  || {}).value   || '';
-  var logoUrl   = (document.getElementById('cfg-logo-url')   || {}).value   || '';
-  var status    = document.getElementById('cfg-save-status');
-
-  if (!_fbReady || !_fbDB) {
-    if (status) status.innerHTML = '<span style="color:#ef4444;">⛔ Firebase non connecté — connectez-vous d’abord.</span>';
-    return;
-  }
-  if (!dmEmail || !chefEmail) {
-    if (status) status.innerHTML = '<span style="color:#ef4444;">⚠️ Saisissez les deux adresses email.</span>';
-    return;
-  }
-
-  // Firebase interdit les '.' dans les clés → remplacer par '_'
-  var emails = {};
-  emails[sanitizeKey(dmEmail)]   = { role: 'dm',   email: dmEmail };
-  emails[sanitizeKey(chefEmail)] = { role: 'chef',  email: chefEmail };
-
-  var cfg = { emails: emails, company: company, dmName: dmName, chefName: chefName, logoUrl: logoUrl, updatedAt: Date.now() };
-
-  if (status) status.innerHTML = '⏳ Sauvegarde en cours...';
-  _fbDB.ref('config').set(cfg).then(function() {
-    // Appliquer localement immédiatement
-    FIREBASE_AUTH_EMAILS = {};
-    FIREBASE_AUTH_EMAILS[dmEmail]   = 'dm';
-    FIREBASE_AUTH_EMAILS[chefEmail] = 'chef';
-    // Mémoriser aussi les clés sanitisées pour la correspondance Firebase
-    FIREBASE_AUTH_EMAILS[sanitizeKey(dmEmail)]   = 'dm';
-    FIREBASE_AUTH_EMAILS[sanitizeKey(chefEmail)] = 'chef';
-    APP_CONFIG.company  = company;
-    APP_CONFIG.dmName   = dmName;
-    APP_CONFIG.chefName = chefName;
-    APP_CONFIG.logoUrl  = logoUrl;
-    if (status) status.innerHTML = '<span style="color:#10b981;">✅ Configuration sauvegardée dans Firebase.</span>';
-    toast('☁ Configuration mise à jour dans Firebase.');
-  }).catch(function(err) {
-    if (status) status.innerHTML = '<span style="color:#ef4444;">❌ Erreur : ' + err.message + '</span>';
-  });
-}
-
-// ══ Admin: Recharger la configuration depuis Firebase /config ══
-function loadFirebaseConfig() {
-  if (!_fbReady || !_fbDB) { toast('⛔ Firebase non connecté.'); return; }
-  var status = document.getElementById('cfg-save-status');
-  if (status) status.innerHTML = '⏳ Chargement...';
-  _fbDB.ref('config').once('value').then(function(snap) {
-    var cfg = snap.val();
-    if (!cfg) { if (status) status.innerHTML = '<span style="color:#f59e0b;">⚠️ Aucune configuration dans Firebase.</span>'; return; }
-    if (cfg.emails) {
-      Object.keys(cfg.emails).forEach(function(em) {
-        var entry = cfg.emails[em];
-        // Support ancien format (string) et nouveau format ({role, email})
-        var role  = (typeof entry === 'object') ? entry.role  : entry;
-        var email = (typeof entry === 'object') ? entry.email : em.replace(/_/g, '.');
-        var inputId = role === 'dm' ? 'cfg-dm-email' : 'cfg-chef-email';
-        var el = document.getElementById(inputId);
-        if (el) el.value = email;
-        FIREBASE_AUTH_EMAILS[email] = role; // clé = email réel avec '.'
-      });
-    }
-    var fields = {company:'cfg-company',dmName:'cfg-dm-name',chefName:'cfg-chef-name',logoUrl:'cfg-logo-url'};
-    Object.keys(fields).forEach(function(key) {
-      if (cfg[key]) {
-        APP_CONFIG[key] = cfg[key];
-        var el = document.getElementById(fields[key]);
-        if (el) el.value = cfg[key];
-      }
-    });
-    if (status) status.innerHTML = '<span style="color:#10b981;">✅ Configuration rechargée depuis Firebase.</span>';
-  }).catch(function(err) {
-    if (status) status.innerHTML = '<span style="color:#ef4444;">❌ ' + err.message + '</span>';
-  });
-}
-
-// Déconnexion
-function _fbSignOut() {
-  if (_fbAuth) _fbAuth.signOut();
-  _fbStopListener();
-  _fbSetCloudBadge('off', '');
-  var info = document.getElementById('google-user-info');
-  if (info) { info.style.display = 'none'; info.textContent = ''; }
-}
-
-// Callback : utilisateur connecté
-function _fbOnSignedIn(user) {
-  var email = user.email || '';
-  var role  = FIREBASE_AUTH_EMAILS[email];
-  var btn   = document.getElementById('btn-google');
-  if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-
-  // Vérifier que l'email est autorisé
-  if (!role) {
-    var infoX = document.getElementById('google-user-info');
-    if (infoX) {
-      infoX.style.display = 'block';
-      infoX.style.background = '#fef2f2';
-      infoX.style.border = '1px solid #fca5a5';
-      infoX.style.color = '#991b1b';
-      infoX.textContent = '\u26d4 Acc\u00e8s refus\u00e9 : ' + email + ' n\'est pas autoris\u00e9.';
-    }
-    _fbAuth.signOut();
-    return;
-  }
-
-  // Afficher l'info utilisateur (style succès)
-  var info = document.getElementById('google-user-info');
-  if (info) {
-    info.style.display = 'block';
-    info.style.background = '#f0fdf4';
-    info.style.border = '1px solid #86efac';
-    info.style.color = '#166534';
-    info.innerHTML = '\u2705 Connect\u00e9 : <strong>' + (user.displayName || email) + '</strong>' +
-      '&nbsp;&nbsp;<span style="font-size:10px;opacity:.8;">' + (role === 'dm' ? '\ud83d\udc54 Dir. Mat\u00e9riel' : '\ud83d\udd27 Chef d\'Atelier') + '</span>';
-  }
-  // ── Connexion Google réussie → entrer dans l'application directement ──
-  selRole(role);
-
-  // Entrer dans l'application sans passer par le formulaire de mot de passe
-  _applyLogin(role, true);
-
-  // Démarrer la synchronisation Firebase
-  _fbStartSync(role);
-
-  // Recharger Gestion Base si ouvert pour afficher le statut Firebase correct
-  setTimeout(function() {
-    var pg = (document.getElementById('ptitle') || {}).textContent || '';
-    if (pg.indexOf('Gestion') > -1 || pg.indexOf('Admin') > -1) {
-      showPage('admin');
-    }
-  }, 500);
-
-  toast('\u2601 Connect\u00e9 avec Google : ' + (user.displayName || email));
-}
-
-// Callback : utilisateur déconnecté
-function _fbOnSignedOut() {
-  _fbStopListener();
-  _fbSetCloudBadge('off', '');
-}
-
-// Démarrer la synchronisation Firebase (écoute temps réel)
-function _fbStartSync(role) {
-  if (!_fbDB) return;
-  _fbStopListener();
-  SYNC.active = false;   // Firebase remplace la sync locale — ne pas activer les boutons réseau
-  SYNC.httpMode = false;
-  _fbSetCloudBadge('syncing', '☁ Connexion...');
-
-  // ── Charger la configuration dynamique (/config) ───
-  _fbDB.ref('config').once('value').then(function(cSnap) {
-    var cfg = cSnap.val();
-    if (cfg) {
-      // Mettre à jour les emails autorisés depuis Firebase
-      if (cfg.emails) {
-        FIREBASE_AUTH_EMAILS = {};
-        Object.keys(cfg.emails).forEach(function(em) {
-          var entry = cfg.emails[em];
-          var role  = (typeof entry === 'object') ? entry.role  : entry;
-          var email = (typeof entry === 'object') ? entry.email : em.replace(/_/g, '.');
-          FIREBASE_AUTH_EMAILS[email] = role;
-        });
-      }
-      // Mettre à jour la configuration générale
-      if (cfg.company) APP_CONFIG.company = cfg.company;
-      if (cfg.logoUrl)  APP_CONFIG.logoUrl  = cfg.logoUrl;
-      if (cfg.dmName)   APP_CONFIG.dmName   = cfg.dmName;
-      if (cfg.chefName) APP_CONFIG.chefName = cfg.chefName;
-    }
-  }).catch(function(e) { console.warn('Firebase /config load:', e.message); });
-
-  // ── Masquer les éléments non pertinents quand Firebase est actif ───
-  _fbHideLocalSyncUI(role);
-
-  // ── Silent upload des données offline en attente ───
-  _fbSilentUploadOffline();
-
-  // ── Lire une fois au démarrage (Single Source of Truth) ───
-  // D'abord lire les équipements ET agents supprimés pour les bloquer avant le merge
-  _fbDB.ref('atcdata/_deletedEquips').once('value').then(function(eqSnap) {
-    var deletedEquips = eqSnap.val();
-    if (deletedEquips) {
-      if (!APP._deletedEquipIds) APP._deletedEquipIds = [];
-      Object.keys(deletedEquips).forEach(function(k) {
-        var entry = deletedEquips[k];
-        var eid = entry.id || k;
-        if (APP._deletedEquipIds.indexOf(eid) === -1) APP._deletedEquipIds.push(eid);
-      });
-      // Marquer ces équipements comme supprimés localement
-      APP.equips.forEach(function(e) {
-        if (APP._deletedEquipIds.indexOf(e.id) > -1) {
-          e.deleted = true;
-        }
-      });
-      console.log('Firebase: équipements supprimés chargés:', APP._deletedEquipIds.length);
-    }
-  }).catch(function(e){ console.warn('Firebase _deletedEquips:', e.message); });
-
-  // Lire les agents supprimés pour les bloquer avant le merge
-  _fbDB.ref('atcdata/_deletedAgents').once('value').then(function(dSnap) {
-    var deletedAgents = dSnap.val();
-    if (deletedAgents) {
-      if (!APP._deletedAgentIds) APP._deletedAgentIds = [];
-      Object.keys(deletedAgents).forEach(function(k) {
-        var entry = deletedAgents[k];
-        var aid = entry.id || k;
-        if (APP._deletedAgentIds.indexOf(aid) === -1) APP._deletedAgentIds.push(aid);
-      });
-      // Supprimer immédiatement ces agents de la liste locale
-      APP.agents = APP.agents.filter(function(a) {
-        return APP._deletedAgentIds.indexOf(a.id) === -1;
-      });
-      console.log('Firebase: agents supprimés chargés:', APP._deletedAgentIds.length);
-    }
-  }).catch(function(e){ console.warn('Firebase _deletedAgents:', e.message); });
-
-  _fbDB.ref('atcdata').once('value').then(function(snap) {
-    var remote = snap.val();
-    if (remote && typeof remote === 'object') {
-      var remBy = remote._by || 'inconnu';
-      var remTs = new Date(remote._ts || 0).toLocaleTimeString('fr-FR');
-      console.log('Firebase: données chargées depuis ' + remBy + ' (' + remTs + ')');
-      try {
-        // Fusionner et TOUJOURS rafraîchir l'UI au démarrage
-        _syncMerge(remote);
-        _saveLocalOnly();
-        autoRefreshUI();
-      } catch(e) { console.error('Firebase merge démarrage:', e); }
-    } else {
-      // Aucune donnée dans Firebase → écrire les données locales
-      console.log('Firebase: base vide — initialisation avec données locales');
-      _fbWriteToCloud();
-    }
-    _fbSetCloudBadge('ok', '☁ Cloud actif');
-  }).catch(function(err) {
-    _fbSetCloudBadge('error', '☁ Erreur');
-    console.error('Firebase lecture démarrage:', err);
-  });
-
-  // ── Écoute temps réel — Single Source of Truth ───
-  // Utilise le timestamp _ts de l'écrivain (pas la taille JSON)
-  // pour distinguer les propres écritures des mises à jour distantes
-  _fbListener = _fbDB.ref('atcdata').on('value', function(snap) {
-    var remote = snap.val();
-    if (!remote) return;
-
-    // Ignorer uniquement SI c'est exactement notre propre dernière écriture
-    // (même timestamp ET même profil)
-    var remTs = remote._ts || 0;
-    var remBy = remote._by || '';
-    if (remTs > 0 && remTs === SYNC._fbLastWriteTs && remBy === ROLE) {
-      // C'est notre propre écriture qui rebondit — ignorer
-      return;
-    }
-
-    // C'est une mise à jour d'un autre profil OU une première connexion
-    try {
-      var changed = _syncMerge(remote);
-      if (changed) {
-        _saveLocalOnly();
-        autoRefreshUI();
-        _fbRefreshKPIs();
-        console.log('Firebase sync: données reçues de', remBy, '— UI mise à jour');
-      } else {
-        // Même si _syncMerge dit "rien changé", forcer le refresh
-        // car les timestamps locaux peuvent masquer des vrais changements
-        autoRefreshUI();
-      }
-    } catch(e) { console.error('Firebase realtime merge:', e); }
-    _fbSetCloudBadge('ok', '☁ Synchronisé');
-  }, function(err) {
-    _fbSetCloudBadge('error', '☁ Erreur');
-    console.error('Firebase listener:', err);
-  });
-}
-
-// Masquer les éléments UI liés au fichier local quand Firebase est actif
-function _fbHideLocalSyncUI(role) {
-  // Banniere "Connecter fichier sync" — masquée en mode Cloud
-  var syncBadge = document.getElementById('sync-badge');
-  if (syncBadge) syncBadge.style.display = 'none';
-  // Badge "Base locale" — réservé exclusivement au profil DM
-  var dbBadge = document.getElementById('db-badge');
-  if (dbBadge) dbBadge.style.display = (role === 'dm') ? 'inline-flex' : 'none';
-  // Badge "Non connecté" — masqué quand Firebase est actif
-  var offBadge = document.getElementById('offline-badge');
-  if (offBadge) offBadge.style.display = 'none';
-}
-
-// Upload silencieux des données offline vers Firebase
-function _fbSilentUploadOffline() {
-  try {
-    var pending = localStorage.getItem(SK + '_offline_pending');
-    if (!pending) return;
-    // Il y a des données saisies hors-ligne — les pousser vers Firebase
-    console.log('Firebase: silent upload of offline data');
-    _fbWriteToCloud();
-    localStorage.removeItem(SK + '_offline_pending');
-    toast('☁ Données hors-ligne synchronisées avec Firebase.');
-  } catch(e) { console.warn('Silent upload:', e); }
-}
-
-// Recalcul KPI/Dashboard en temps réel après mise à jour Firebase
-function _fbRefreshKPIs() {
-  var pg = document.getElementById('ptitle');
-  if (!pg) return;
-  var title = pg.textContent || '';
-  if (title.indexOf('Dashboard') > -1 || title.indexOf('dashboard') > -1) {
-    try { renderDash(); } catch(e) {}
-  }
-}
-
-// Arrêter l'écoute Firebase
-function _fbStopListener() {
-  if (_fbDB && _fbListener) {
-    _fbDB.ref('atcdata').off('value', _fbListener);
-    _fbListener = null;
-  }
-}
-
-// Écriture Firebase — indépendante de SYNC.active (Firebase First)
-SYNC._fbLastWriteTs = 0; // timestamp de la dernière écriture Firebase locale
-var _fbWriteDebounce = null;
-
-function _fbWriteToCloud() {
-  if (!_fbDB || !_fbAuth || !_fbAuth.currentUser) return;
-
-  // Debounce 400ms — grouper les appels rapides
-  if (_fbWriteDebounce) clearTimeout(_fbWriteDebounce);
-  _fbWriteDebounce = setTimeout(function() {
-    try {
-      var rawPayload = JSON.parse(_syncPayload());
-
-      // Nettoyer les clés — Firebase interdit les "." dans les clés
-      var payload = JSON.parse(JSON.stringify(rawPayload, function(key, value) {
-        if (value && typeof value === 'object' && !Array.isArray(value)) {
-          var replacement = {};
-          for (var k in value) {
-            // Firebase interdit dans les clés : . # $ / [ ] espaces
-            var cleanKey = sanitizeKey(k);
-            replacement[cleanKey] = value[k];
-          }
-          return replacement;
-        }
-        return value;
-      }));
-
-      SYNC._fbLastWriteTs = payload._ts || 0; // timestamp réel de l'écriture
-
-      // Écriture dans Firebase Realtime Database
-      _fbDB.ref('atcdata').set(payload).then(function() {
-        _fbSetCloudBadge('ok', '☁ Synchronisé');
-        try { localStorage.removeItem(SK + '_offline_pending'); } catch(e) {}
-      }).catch(function(err) {
-        _fbSetCloudBadge('error', '☁ Erreur écriture');
-        _saveLocalOnly();
-        console.error('Firebase write error:', err.code, err.message);
-        var st = document.getElementById('cfg-save-status');
-        if (st) st.innerHTML = '<span style="color:#ef4444;">❌ Firebase : ' + (err.code||'') + ' — ' + (err.message||'') + '</span>';
-        toast('❌ Firebase échec : ' + (err.code || err.message));
-      });
-    } catch(e) {
-      console.error('Firebase write prep:', e);
-    }
-  }, 400);
-}
 
 // Badge Cloud dans le topbar
 function _fbSetCloudBadge(status, label) {
@@ -6830,28 +6482,21 @@ function delEquip(id) {
   if (!confirm('Supprimer cet équipement ?')) return;
   var e = APP.equips.find(function(eq) { return eq.id === id; });
   if (e) {
-    // 1. Ajouter à la liste noire persistante (identique aux agents)
     if (!APP._deletedEquipIds) APP._deletedEquipIds = [];
     if (APP._deletedEquipIds.indexOf(id) === -1) APP._deletedEquipIds.push(id);
-
-    // 2. Écrire le flag deleted dans Firebase /atcdata/_deletedEquips
     if (_fbReady && _fbDB) {
       _fbDB.ref('atcdata/_deletedEquips/' + sanitizeKey(id)).set({
         id: id, code: e.code, deletedAt: Date.now(), deletedBy: ROLE
       });
     }
-
-    // 3. Soft-delete avec timestamp
-    e.deleted   = true;
-    e.deletedAt = Date.now();
-    e.deletedBy = ROLE;
+    e.deleted = true; e.deletedAt = Date.now(); e.deletedBy = ROLE;
     _stampField('equip.' + (e.code || id) + '.deleted');
     _stampSection('equips');
   }
   saveApp();
   if (_fbReady && _fbDB) _fbWriteToCloud();
   filterEq();
-  toast('\u2705 Équipement supprimé et synchronisé.');
+  toast('\u2705 \u00c9quipement supprim\u00e9 et synchronis\u00e9.');
 }
 
 // Nettoyer les équipements supprimés du JSON après 7 jours (appel périodique)
@@ -8103,4 +7748,53 @@ if (rptComment) {
 </style>
 
 </body>
-</html>
+</html>function _sanitizeObj(val) {
+  return JSON.parse(JSON.stringify(val, function(key, v) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      var r = {}; for (var k in v) { r[sanitizeKey(k)] = v[k]; } return r;
+    }
+    return v;
+  }));
+}
+
+function _fbWriteToCloud() {
+  if (!_fbDB || !_fbAuth || !_fbAuth.currentUser) return;
+  if (_fbWriteDebounce) clearTimeout(_fbWriteDebounce);
+  _fbWriteDebounce = setTimeout(function() {
+    try {
+      var ts = Date.now();
+      var ref = _fbDB.ref('atcdata');
+      var update = {
+        '_by': ROLE, '_ts': ts, '_v': 'v8',
+        '_fieldTs':        _sanitizeObj(APP.fieldTs     || {}),
+        '_sections':       _sanitizeObj(SYNC._sectionTs || {}),
+        '_deletedAgentIds': APP._deletedAgentIds || [],
+        '_deletedEquipIds': APP._deletedEquipIds || [],
+        'equips':    _sanitizeObj(APP.equips    || []),
+        'agents':    _sanitizeObj(APP.agents    || []),
+        'planning':  _sanitizeObj(APP.planning  || {}),
+        'suiviTaches': _sanitizeObj(APP.suiviTaches || {}),
+        'taches':    _sanitizeObj(APP.taches    || []),
+        'hist':      _sanitizeObj(APP.hist      || [])
+      };
+      if (ROLE === 'dm') {
+        update['masterplan']       = _sanitizeObj(APP.masterplan || {});
+        update['masterplanLocked'] = APP.masterplanLocked || false;
+        update['dm_inst']          = _sanitizeObj(APP.dm  || []);
+        update['urg']              = _sanitizeObj(APP.urg  || []);
+        update['pw']               = _sanitizeObj(APP.pw   || {});
+        update['priorityRules']    = _sanitizeObj(APP.priorityRules || {});
+        update['tacheTypes']       = APP.tacheTypes || [];
+      }
+      SYNC._fbLastWriteTs = ts;
+      ref.update(update).then(function() {
+        _fbSetCloudBadge('ok', '\u2601 Synchronis\u00e9');
+        try { localStorage.removeItem(SK + '_offline_pending'); } catch(e) {}
+      }).catch(function(err) {
+        _fbSetCloudBadge('error', '\u2601 Erreur');
+        _saveLocalOnly();
+        toast('\u274c Firebase : ' + (err.code||err.message||'erreur'));
+      });
+    } catch(e) { console.error('Firebase write:', e); }
+  }, 400);
+}
