@@ -1077,7 +1077,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v17.3';
+var APP_VERSION = 'v17.4';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -3357,7 +3357,9 @@ function addTacheType() {
   if (!APP.tacheTypes) APP.tacheTypes = [];
   if (APP.tacheTypes.indexOf(val) > -1) { toast('Ce type existe déjà.'); return; }
   APP.tacheTypes.push(val);
+  _stampField('tacheTypes');
   saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
   if (_fbReady && _fbDB) _fbWriteToCloud();
   showPage('admin');
   toast('✅ Type "' + val + '" ajouté.');
@@ -3365,7 +3367,9 @@ function addTacheType() {
 function removeTacheType(val) {
   if (!confirm('Supprimer le type "' + val + '" ?')) return;
   APP.tacheTypes = (APP.tacheTypes || []).filter(function(t){ return t !== val; });
+  _stampField('tacheTypes');
   saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
   if (_fbReady && _fbDB) _fbWriteToCloud();
   showPage('admin');
   toast('✅ Type "' + val + '" supprimé.');
@@ -5386,18 +5390,19 @@ function lockMP() {
   APP.masterplanLocked = true;
   _stampField('masterplanLocked');
   saveApp();
-  // Push immédiat SANS debounce — le Chef doit voir le verrou en < 1s
+  // UPDATE ciblé — ne touche QUE masterplanLocked + _ts pour déclencher le listener Chef
   if (_fbReady && _fbDB && _fbAuth && _fbAuth.currentUser) {
-    var raw = JSON.parse(_syncPayload());
-    var payload = JSON.parse(JSON.stringify(raw, function(k,v){
-      if(v&&typeof v==='object'&&!Array.isArray(v)){var r={};for(var key in v){r[sanitizeKey(key)]=v[key];}return r;}
-      return v;
-    }));
-    SYNC._fbLastWriteTs = payload._ts||0;
-    _fbDB.ref('atcdata').set(payload).then(function(){
-      _fbSetCloudBadge('ok','\u2601 Verrou envoy\u00e9');
-      console.log('Firebase: masterplanLocked=true envoy\u00e9');
-    }).catch(function(e){ console.error('lockMP push:',e); });
+    var ts = Date.now();
+    SYNC._fbLastWriteTs = ts;
+    _fbDB.ref('atcdata').update({
+      '_by': 'dm',
+      '_ts': ts,
+      'masterplanLocked': true,
+      '_fieldTs': _sanitizeObj(APP.fieldTs || {})
+    }).then(function(){
+      _fbSetCloudBadge('ok', '\uD83D\uDD12 Verrou envoy\u00e9');
+      console.log('Firebase: masterplanLocked=true envoy\u00e9 (UPDATE cibl\u00e9)');
+    }).catch(function(e){ console.error('lockMP push:', e); });
   }
   toast('\uD83D\uDD12 Plan verrouill\u00e9 \u2014 aucune modification possible.');
   renderMP();
@@ -5407,18 +5412,19 @@ function unlockMP() {
   APP.masterplanLocked = false;
   _stampField('masterplanLocked');
   saveApp();
-  // Push immédiat SANS debounce
+  // UPDATE ciblé — déclenche le listener _ts côté Chef
   if (_fbReady && _fbDB && _fbAuth && _fbAuth.currentUser) {
-    var raw2 = JSON.parse(_syncPayload());
-    var payload2 = JSON.parse(JSON.stringify(raw2, function(k,v){
-      if(v&&typeof v==='object'&&!Array.isArray(v)){var r={};for(var key in v){r[sanitizeKey(key)]=v[key];}return r;}
-      return v;
-    }));
-    SYNC._fbLastWriteTs = payload2._ts||0;
-    _fbDB.ref('atcdata').set(payload2).then(function(){
-      _fbSetCloudBadge('ok','\u2601 D\u00e9verrou envoy\u00e9');
-      console.log('Firebase: masterplanLocked=false envoy\u00e9');
-    }).catch(function(e){ console.error('unlockMP push:',e); });
+    var ts2 = Date.now();
+    SYNC._fbLastWriteTs = ts2;
+    _fbDB.ref('atcdata').update({
+      '_by': 'dm',
+      '_ts': ts2,
+      'masterplanLocked': false,
+      '_fieldTs': _sanitizeObj(APP.fieldTs || {})
+    }).then(function(){
+      _fbSetCloudBadge('ok', '\uD83D\uDD13 D\u00e9verrou envoy\u00e9');
+      console.log('Firebase: masterplanLocked=false envoy\u00e9 (UPDATE cibl\u00e9)');
+    }).catch(function(e){ console.error('unlockMP push:', e); });
   }
   toast('\uD83D\uDD13 Plan d\u00e9verrouill\u00e9.');
   renderMP();
@@ -7613,7 +7619,11 @@ function lockAndSavePriorityRules() {
       return v;
     }));
     SYNC._fbLastWriteTs = payload._ts||0;
-    _fbDB.ref('atcdata').set(payload).then(function(){
+    _fbDB.ref('atcdata').update({
+        '_by': ROLE, '_ts': Date.now(),
+        'priorityRules': _sanitizeObj(APP.priorityRules || {}),
+        '_fieldTs': _sanitizeObj(APP.fieldTs || {})
+      }).then(function(){
       toast('\u2705 Règles de priorité verrouillées et synchronisées avec Firebase. Les 2 profils appliquent maintenant les mêmes règles.');
       var statusEl = document.getElementById('pr-save-status');
       if (statusEl) {
@@ -7862,6 +7872,36 @@ function loadFirebaseConfig() {
   }).catch(function(err) {
     if (status) status.innerHTML = '<span style="color:#ef4444;">❌ ' + err.message + '</span>';
   });
+}
+
+
+function addFamily() {
+  var inp = document.getElementById('new-family-input');
+  if (!inp) return;
+  var val = inp.value.trim().toUpperCase();
+  if (!val) { toast('Saisissez un nom de famille.'); return; }
+  if (!APP.familles) APP.familles = [];
+  if (APP.familles.indexOf(val) > -1) { toast('Cette famille existe déjà.'); return; }
+  APP.familles.push(val);
+  APP.familles.sort();
+  _stampField('famille.edit');
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  inp.value = '';
+  var dynEl = document.getElementById('page-admin');
+  if (dynEl) dynEl.innerHTML = buildAdminPage();
+  toast('✅ Famille ajoutée : ' + val);
+}
+
+function removeFamily(fam) {
+  if (!confirm('Supprimer la famille "' + fam + '" ?')) return;
+  APP.familles = (APP.familles || []).filter(function(f){ return f !== fam; });
+  _stampField('famille.edit');
+  saveApp();
+  if (_fbReady && _fbDB) _fbWriteToCloud();
+  var dynEl = document.getElementById('page-admin');
+  if (dynEl) dynEl.innerHTML = buildAdminPage();
+  toast('✅ Famille supprimée : ' + fam);
 }
 
 </script>
