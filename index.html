@@ -99,6 +99,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a1628'/%3E%3Ctext x='6' y='24' font-size='20' font-family='Arial' font-weight='bold' fill='%23f97316'%3EAT%3C/text%3E%3C/svg%3E">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DM-PLANNING v8 | Direction Matériel Planning — SOSETER HYDRO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1090,7 +1091,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v18.3';
+var APP_VERSION = 'v18.4';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -2447,6 +2448,23 @@ function _fbOnSignedIn(user) {
     }
   }, function(err){ console.error('Firebase planning listener:', err.message); });
 
+  // ── Listener onValue dm : Instructions DM en temps réel ─────────────────
+  // Couvre les cas où le DM ajoute/modifie/supprime une instruction
+  _fbDB.ref('atcdata/dm').on('value', function(snap) {
+    var remDm = snap.val();
+    if (!Array.isArray(remDm)) return;
+    if (JSON.stringify(APP.dm) !== JSON.stringify(remDm)) {
+      APP.dm = remDm;
+      console.log('Firebase dm: ' + remDm.length + ' instruction(s) synchronisée(s)');
+      // Rafraîchir le module Instructions DM si visible
+      try {
+        var pg = (document.getElementById('ptitle')||{}).textContent||'';
+        if (pg === 'Instructions DM') renderDMPage();
+        else autoRefreshUI();
+      } catch(e) {}
+    }
+  }, function(err){ console.error('Firebase dm listener:', err.message); });
+
 
 
   // ── Étape 3 : Listener temps réel sur _ts ───────────────────
@@ -3750,15 +3768,15 @@ if (!APP.priorityRules) {
     'dm.text':               'dm',    // Texte instruction → DM
     'dm.priority':           'dm',    // Priorité instruction → DM
     'dm.dest':               'dm',    // Destinataire → DM
-    'dm.executed':           'chef',  // Validation/Exécution → Chef
+    'dm.executed':           'dm',    // Validation/Exécution → DM (défaut DM)
     'dm.comment':            'chef',  // Commentaire retour → Chef
     'dm.deleteInstruction':  'dm',    // Suppression instruction → DM
     'dm.create':             'dm',
     // ── PERSONNEL / RH ──────────────────────────── (conforme capture)
     'agent.actif':           'chef',  // Agent actif/inactif → Chef
     'agent.heures':          'chef',  // Heures journalières → Chef
-    'agent.supp':            'chef',  // Heures supplémentaires → Chef
-    'agent.metier':          'chef',  // Métier agent → Chef (capture=Chef)
+    'agent.supp':            'dm',    // Heures supplémentaires → DM
+    'agent.metier':          'dm',    // Métier agent → DM
     'agent.deleted':         'dm',    // Suppression définitive → DM
     'agent.create':          'dm',
     // ── SUIVI DES TÂCHES ────────────────────────── (conforme capture)
@@ -4391,8 +4409,8 @@ function resetPriorityRules() {
     'plan.included':'dm','plan.generateTop10':'dm','plan.frozen':'dm',
     'plan.agent':'chef','plan.realisation':'chef','plan.commentaire':'chef','plan.pieces':'chef','plan.rptComment':'chef',
     'mp.cell':'dm','masterplanLocked':'dm',
-    'dm.text':'dm','dm.priority':'dm','dm.dest':'dm','dm.executed':'chef','dm.comment':'chef','dm.deleteInstruction':'dm','dm.create':'dm',
-    'agent.actif':'chef','agent.heures':'chef','agent.supp':'chef','agent.metier':'chef','agent.deleted':'dm','agent.create':'dm',
+    'dm.text':'dm','dm.priority':'dm','dm.dest':'dm','dm.executed':'dm','dm.comment':'chef','dm.deleteInstruction':'dm','dm.create':'dm',
+    'agent.actif':'chef','agent.heures':'chef','agent.supp':'dm','agent.metier':'dm','agent.deleted':'dm','agent.create':'dm',
     'suivi.done':'chef','suivi.rh':'chef','suivi.addTask':'chef','suivi.deleteTask':'chef','suivi.anomalies':'chef',
     'hist.addEntry':'dm','famille.edit':'dm'
   }
@@ -8104,28 +8122,33 @@ var _dynPerms = null; // Cache local des permissions Firebase
 
 function _loadDynPermissions() {
   if (!_fbDB) return;
+  console.log('Firebase: chargement des règles de priorité depuis atcdata/permissions...');
   _fbDB.ref('atcdata/permissions').on('value', function(snap) {
     var p = snap.val();
-    if (!p) {
-      // Créer les permissions par défaut si absentes
-      _initDynPermissions();
+    if (!p || !p.priorityRules) {
+      // Aucune règle en Firebase → publier les valeurs par défaut locales
+      console.log('Firebase: aucune règle trouvée → publication des règles par défaut');
+      if (ROLE === 'dm') _initDynPermissions();
       return;
     }
     _dynPerms = p;
-    console.log('Firebase: permissions chargées depuis app_settings/permissions');
-    // Mettre à jour les règles de priorité locales si Firebase en a
+    // ── Firebase = source de vérité ─────────────────────────────────────────
+    // Les règles Firebase ÉCRASENT toujours les valeurs par défaut locales
     if (p.priorityRules && typeof p.priorityRules === 'object') {
-      // Désanitizer les clés (__ → .) depuis Firebase
       var restored = _desanitizeRulesFromFirebase(p.priorityRules);
-      Object.keys(restored).forEach(function(k){
-        APP.priorityRules[k] = restored[k];
-      });
+      // Écraser complètement les règles locales par celles de Firebase
+      Object.keys(restored).forEach(function(k){ APP.priorityRules[k] = restored[k]; });
+      console.log('Firebase: ' + Object.keys(restored).length + ' règles de priorité chargées (version DM du ' + (p.updatedAt ? new Date(p.updatedAt).toLocaleDateString('fr-FR') : '?') + ')');
     }
-    // Rafraîchir l'UI pour activer/désactiver les boutons selon les droits
-    autoRefreshUI();
-    // Mettre à jour le rendu des règles si le module est visible
-    try { if (typeof renderPriorityRulesUI === 'function') renderPriorityRulesUI(); } catch(e) {}
-  }, function(err){ console.warn('app_settings/permissions:', err.message); });
+    // Rafraîchir l'UI → les boutons s'activent/désactivent selon les droits
+    try {
+      if (typeof renderPriorityRulesUI === 'function') renderPriorityRulesUI();
+      autoRefreshUI();
+    } catch(e) {}
+  }, function(err){
+    console.warn('atcdata/permissions listener:', err.message);
+    // Même si Firebase est inaccessible → continuer avec les règles locales
+  });
 }
 
 function _initDynPermissions() {
@@ -8228,7 +8251,13 @@ function _fbWriteToCloud() {
         'planning':  _sanitizeObj(APP.planning  || {}),
         'suiviTaches': _sanitizeObj(APP.suiviTaches || {}),
         'taches':    _sanitizeObj(APP.taches    || []),
-        'hist':      _sanitizeObj(APP.hist      || [])
+        'hist':      _sanitizeObj(APP.hist      || []),
+        'dm':        _sanitizeObj(APP.dm        || []),   // Instructions DM — sync bidirectionnelle
+        'urg':       _sanitizeObj(APP.urg       || []),   // Urgences
+        'masterplan':_sanitizeObj(APP.masterplan|| {}),   // Master Planning
+        'pw':        _sanitizeObj(APP.pw        || {}),   // Mots de passe
+        'priorityRules': _sanitizeObj(APP.priorityRules || {}),  // Règles de priorité
+        'masterplanLocked': APP.masterplanLocked || false
       };
       if (ROLE === 'dm') {
         update['masterplan']       = _sanitizeObj(APP.masterplan || {});
