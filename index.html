@@ -1075,7 +1075,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v17.6';
+var APP_VERSION = 'v17.7';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1560,6 +1560,7 @@ function _syncMerge(remote) {
           applyField(le, 'pieces',    re.pieces,    'equip.pieces',    'Pièces ' + eid,        eid);
           applyField(le, 'desc',      re.desc,      'equip.desc',      'Description ' + eid,   eid);
           applyField(le, 'anomalies', re.anomalies, 'equip.anomalies', 'Anomalies ' + eid,     eid);
+          applyField(le, 'standby',   re.standby,   'equip.standby',   'Standby ' + eid,       eid);
         }
       }
     });
@@ -2327,7 +2328,7 @@ function _fbOnSignedIn(user) {
   // ── Étape 3 : Listener temps réel sur _ts ───────────────────
   _fbDB.ref('atcdata/_ts').on('value', function(snap) {
     var remoteTs = snap.val() || 0;
-    if (remoteTs > SYNC._fbLastWriteTs + 800) {
+    if (remoteTs > SYNC._fbLastWriteTs + 2000) {  // Absorbe debounce(400)+réseau(500)+marge
       // Le timestamp distant est plus récent → lire et merger
       _fbDB.ref('atcdata').once('value').then(function(fullSnap) {
         var remote = fullSnap.val();
@@ -4123,7 +4124,7 @@ function resetPriorityRules() {
   // Forcer la réinitialisation
   APP.priorityRules = {
     'equip.statut':'chef','equip.pieces':'chef','equip.priority':'dm',
-    'equip.desc':'dm','equip.anomalies':'chef','equip.create':'dm','equip.delete':'dm','equip.deleted':'dm',
+    'equip.desc':'dm','equip.anomalies':'chef','equip.create':'dm','equip.delete':'dm','equip.deleted':'dm','equip.standby':'chef',
     'ord.criteriaOrder':'dm','ord.priority':'dm','ord.pieces':'chef',
     'plan.included':'dm','plan.generateTop10':'dm','plan.frozen':'dm',
     'plan.agent':'chef','plan.realisation':'chef','plan.commentaire':'chef',
@@ -5663,7 +5664,10 @@ function autoGeneratePlanning() {
 
   var candidates = [];
   APP.equips.forEach(function(e) {
-    if (e.statut === 'OK') return;
+    if (e.statut === 'OK') return;                           // Filtre 1: opérationnel exclu
+    if (e.deleted) return;                                   // Filtre 2: supprimé exclu
+    // STANDBY = exclu du Top10 TOUJOURS (Chef a décidé d'attendre les pièces)
+    if (e.standby) { candidates.push({e:e, score:-9999, inProgress:false, frozen:false}); return; }
 
     // ══════════════════════════════════════════════════════════
     // SCORING TOP 10 — Algorithme révisé v17.5
@@ -5677,23 +5681,21 @@ function autoGeneratePlanning() {
     var mpVal = APP.masterplan[mpKey] || '';
     var mpScore = (mpVal === 'plan') ? 100 : 0;
 
-    // ── Critère 2 : Pièces disponibles (BLOQUANT si non dispo + MP ce mois)
-    // Disponible=+60, Partiellement=+35, Non disponible=-30 (pénalité)
+    // ── FILTRE STANDBY : exclure immédiatement les équipements en attente pièces
+    if (e.standby) { candidates.push({e:e, score:-9999, inProgress:false, frozen:false}); return; }
+
+    // ── Critère 2 : Pièces disponibles
+    // Disponible=+60 | Partiel=+35 | Non disponible=-50 (pénalité forte)
     var pieceScore;
-    if (e.pieces === 'Disponible') {
-      pieceScore = 60;
-    } else if (e.pieces === 'Partiellement disponible') {
-      pieceScore = 35;
-    } else {
-      // Non disponible → pénalité si l'équipement n'a pas de travaux en cours
-      pieceScore = -30;
-    }
+    if (e.pieces === 'Disponible')                  { pieceScore = 60; }
+    else if (e.pieces === 'Partiellement disponible') { pieceScore = 35; }
+    else                                             { pieceScore = -50; }
 
-    // ── Critère 3 : Priorité opérationnelle (1=critique → +40, 5=faible → +0)
-    var prio = e.priority || 3;
-    var prioScore = Math.max(0, 40 - (prio - 1) * 10); // 1→40, 2→30, 3→20, 4→10, 5→0
+    // ── Critère 3 : Priorité opérationnelle (table directe 1→+40, 5→0)
+    var prio = parseInt(e.priority) || 3;
+    var prioScore = [40, 30, 20, 10, 0][Math.min(4, Math.max(0, prio - 1))];
 
-    // ── Critère 4 : Travaux en cours — ANNULE la pénalité pièces si >25%
+    // ── Critère 4 : Travaux en cours — annule pénalité pièces si réalisation ≥25%
     var pct = computeEquipPct(e.id);
     var bestDayReal = 0;
     days.forEach(function(d) {
@@ -5702,19 +5704,18 @@ function autoGeneratePlanning() {
     });
     var effectivePct = Math.max(pct, bestDayReal);
     var realScore = 0;
-    if (effectivePct >= 75) { realScore = 40; } // Presque terminé → fort bonus
-    else if (effectivePct >= 25) { realScore = 25; pieceScore = Math.max(0, pieceScore); } // En cours → annule pénalité
-    else if (effectivePct > 0) { realScore = 10; }
+    if (effectivePct >= 75)      { realScore = 40; }
+    else if (effectivePct >= 25) { realScore = 25; pieceScore = Math.max(0, pieceScore); }
+    else if (effectivePct > 0)   { realScore = 10; }
     var inProgress = effectivePct > 0 && effectivePct < 100;
 
-    // ── Critère 5 : Instructions DM ciblant cet équipement (+20/instruction)
+    // ── Critère 5 : Instructions DM actives (+20/instruction)
     var dmScore = (APP.dm || []).filter(function(d){
-      return !d.executed && d.dest.toUpperCase().indexOf(e.code) !== -1;
+      return !d.executed && d.dest && d.dest.toUpperCase().indexOf(e.code) !== -1;
     }).length * 20;
 
     var total = mpScore + pieceScore + prioScore + realScore + dmScore;
-    // Score minimum = 0 (pas de score négatif total)
-    total = Math.max(0, total);
+    total = Math.max(0, total);  // plancher à 0
     candidates.push({ e: e, score: total, inProgress: inProgress, effectivePct: effectivePct });
   });
 
@@ -6460,13 +6461,16 @@ function renderOrdList() {
       '</div>' +
       '<div style="display:flex;gap:5px;align-items:center;">' +
         '<label style="font-size:10px;text-transform:none;font-weight:500;margin:0;color:var(--g600);">Priorite:</label>' +
-        '<select onchange="(function(id,v){var _eq=APP.equips.find(function(eq){return eq.id===id});_eq.priority=parseInt(v);_stampField("equip."+_eq.code+".priority");saveApp();renderOrdList();})(\''+e.id+'\',this.value)" style="font-size:10px;padding:2px;width:55px;">' +
-          [1,2,3,4,5].map(function(n) { return '<option ' + ((e.priority||2)===n?'selected':'') + '>' + n + '</option>'; }).join('') +
+        '<select onchange="(function(id,v){var _eq=APP.equips.find(function(eq){return eq.id===id});var _pv=parseInt(v);if(!isNaN(_pv)&&_pv>=1&&_pv<=5){_eq.priority=_pv;_stampField("equip."+_eq.code+".priority");saveApp();renderOrdList()};})(\''+e.id+'\',this.value)" style="font-size:10px;padding:2px;width:55px;">' +
+          [1,2,3,4,5].map(function(n) { return '<option value="' + n + '" ' + ((parseInt(e.priority)||3)===n?'selected':'') + '>' + n + '</option>'; }).join('') +
         '</select>' +
         '<label style="font-size:10px;text-transform:none;font-weight:500;margin:0;color:var(--g600);">Pieces:</label>' +
         '<select onchange="(function(id,v){var _eq2=APP.equips.find(function(eq){return eq.id===id});_eq2.pieces=v;_stampField(\'equip.\'+_eq2.code+\'.pieces\');_stampField(\'equip.pieces\');saveApp();renderOrdList();if(typeof filterEq===\'function\'){try{filterEq();}catch(e){}};})(\''+e.id+'\',this.value)" style="font-size:10px;padding:2px;">' +
           ['Disponible','Partiellement disponible','Non disponible'].map(function(p) { return '<option ' + ((e.pieces||'Non disponible')===p?'selected':'') + '>' + p + '</option>'; }).join('') +
         '</select>' +
+        (ROLE === 'chef'
+          ? '<button onclick="toggleStandby(\'' + e.id + '\')" style="font-size:9px;padding:2px 8px;border-radius:10px;border:1px solid ' + (e.standby?'#ef4444':'#d1d5db') + ';background:' + (e.standby?'#fee2e2':'#f9fafb') + ';color:' + (e.standby?'#dc2626':'#6b7280') + ';cursor:pointer;font-weight:600;margin-left:4px;" title="Standby: exclure du Top 10 (attente pièces)">' + (e.standby ? '⏸ Standby actif' : '▶ Actif') + '</button>'
+          : (e.standby ? '<span style="font-size:9px;color:#dc2626;font-weight:700;margin-left:4px;">⏸ Standby DM</span>' : '')) +
       '</div>' +
     '</div>';
   }).join('');
@@ -6507,7 +6511,7 @@ function filterEq() {
         '<td><strong>' + e.code + '</strong></td>' +
         '<td>' + (e.type||'--') + '</td>' +
         '<td>' + (e.immat||'--') + '</td>' +
-        '<td><span class="badge ' + (e.statut==='OK'?'bok':e.statut==='IMMOBILISE'?'bimmob':'bpanne') + '">' + e.statut + '</span></td>' +
+        '<td><span class="badge ' + (e.statut==='OK'?'bok':e.statut==='IMMOBILISE'?'bimmob':'bpanne') + '">' + e.statut + '</span>' + (e.standby ? '<span class="badge" style="background:#fef2f2;color:#dc2626;font-size:9px;margin-left:3px;">⏸</span>' : '') + '</td>' +
         '<td><span class="badge bgray" style="font-size:9px;">' + (e.pieces||'--') + '</span></td>' +
         '<td class="trunc ts" style="max-width:200px;">' +
           (ROLE === 'dm'
@@ -7734,6 +7738,8 @@ function _sanitizeObj(val) {
 
 function _fbWriteToCloud() {
   if (!_fbApp || !_fbDB || !_fbAuth || !_fbAuth.currentUser) return;
+  // ⚡ RACE CONDITION FIX: bloquer le listener _ts pendant le debounce
+  SYNC._fbLastWriteTs = Date.now();
   if (_fbWriteDebounce) clearTimeout(_fbWriteDebounce);
   _fbWriteDebounce = setTimeout(function() {
     try {
@@ -7955,6 +7961,30 @@ function removeFamily(fam) {
   var dynEl = document.getElementById('page-admin');
   if (dynEl) dynEl.innerHTML = buildAdminPage();
   toast('✅ Famille supprimée : ' + fam);
+}
+
+
+// ════════════════════════════════════════════════════════════════
+// STANDBY — Chef d'Atelier : équipement en attente de pièces
+// Exclut du Top 10 jusqu'à disponibilité des pièces
+// ════════════════════════════════════════════════════════════════
+function toggleStandby(eid) {
+  if (ROLE !== 'chef') {
+    toast('\u26d4 Le mode Standby est r\u00e9serv\u00e9 au Chef d\'Atelier.');
+    return;
+  }
+  var e = APP.equips.find(function(eq){ return eq.id === eid; });
+  if (!e) return;
+  e.standby = !e.standby;
+  e.standbyAt = e.standby ? Date.now() : null;
+  e.standbyBy = e.standby ? 'chef' : null;
+  _stampField('equip.' + e.code + '.standby');
+  saveApp();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
+  renderOrdList();
+  toast(e.standby
+    ? '\u23F8 ' + e.code + ' mis en STANDBY (exclu Top 10 — attente pi\u00e8ces)'
+    : '\u25B6 ' + e.code + ' sorti du STANDBY');
 }
 
 </script>
