@@ -714,6 +714,8 @@ textarea{resize:vertical;min-height:60px}
 <!-- MAIN -->
 <div id="main">
   <div id="mob-overlay" onclick="closeMobSidebar()"></div>
+  <!-- ══ Bannière connexion hors-ligne (Full Online) ══ -->
+  <div id="connection-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;padding:10px 20px;text-align:center;font-size:13px;font-weight:700;letter-spacing:.3px;box-shadow:0 2px 8px rgba(0,0,0,.2);"></div>
   <div id="topbar">
     <button id="mob-hamburger" onclick="toggleMobSidebar()" aria-label="Menu">&#9776;</button>
     <div class="ptitle" id="ptitle">Dashboard</div>
@@ -1075,7 +1077,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v17.12';
+var APP_VERSION = 'v18.0';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1197,17 +1199,17 @@ var INIT_HIST   = [{"id": "h1", "date": "2026-02-16", "code": "TC12", "famille":
 // PERSISTENCE — localStorage (primaire) + IndexedDB (backup)
 // ============================================================
 function loadApp() {
-  // 1. Try localStorage first (fast, synchronous)
-  try {
-    var r = localStorage.getItem(SK);
-    if (r) { var d = JSON.parse(r); if (d && d.equips) return d; }
-  } catch(e) {}
-  // 2. Fallback: sessionStorage (survives F5 in Edge restrictif)
-  try {
-    var s = sessionStorage.getItem(SK);
-    if (s) { var sd = JSON.parse(s); if (sd && sd.equips) return sd; }
-  } catch(e) {}
-  return null;
+  // Full Online v18.0 — démarrage à vide, Firebase charge tout au login
+  return {
+    equips:[], agents:[], dm:[], urg:[], hist:[],
+    planning:{daily:{lundi:{},mardi:{},mercredi:{},jeudi:{},vendredi:{},samedi:{},dimanche:{}},weekKey:'',top10ids:[]},
+    masterplan:{}, masterplanLocked:false,
+    taches:[], tacheTypes:['01-MECANIQUE','02-ELECTRIQUE','03-HYDRAULIQUE','04-CARROSSERIE',
+      '05-PNEUMATIQUE','06-SOUDURE','07-INSPECTION','08-ADMINIST','09-MAGASIN'],
+    suiviTaches:{}, pw:{dm:'DM2026',chef:'CHEF2026'},
+    fieldTs:{}, priorityRules:{}, familles:[], metiers:[],
+    _deletedAgentIds:[], _deletedEquipIds:[], conflictLog:[]
+  };
 }
 
 // saveApp defined below after _syncPayload (enhanced version with section timestamps)
@@ -1352,31 +1354,19 @@ function _activeEquips() {
 }
 
 function saveApp() {
+  // Full Online v18.0 — Firebase est la SEULE source de vérité
   if (!APP.fieldTs) APP.fieldTs = {};
-  var json = JSON.stringify(APP);
-  // Persistance locale multi-couche (mode hors-ligne + Edge F5)
-  try { localStorage.setItem(SK, json); } catch(e) {}
-  try { sessionStorage.setItem(SK, json); } catch(e) {}
-  _idbSave(SK, json);
-  // Firebase First : si connecté, écriture immédiate sans attendre SYNC.active
   if (_fbApp && _fbDB && _fbAuth && _fbAuth.currentUser) {
     _fbWriteToCloud();
   } else {
-    // Hors-ligne ou connexion locale par mot de passe → stockage local
-    console.log('App: sauvegarde locale (hors-ligne ou mode local) — ' + new Date().toLocaleTimeString('fr-FR'));
-    _syncWrite();
+    console.warn('saveApp: Firebase indisponible — modification non persistée (mode hors-ligne).');
   }
 }
 
 // Sauvegarde silencieuse offline (sans déclencher sync réseau)
 function _saveLocalOnly() {
+  // Full Online: aucune persistance locale — APP reste en mémoire RAM
   if (!APP.fieldTs) APP.fieldTs = {};
-  var json = JSON.stringify(APP);
-  try { localStorage.setItem(SK, json); } catch(e) {}
-  try { sessionStorage.setItem(SK, json); } catch(e) {}
-  _idbSave(SK, json);
-  // Marquer qu'il y a des données hors-ligne à remonter
-  try { localStorage.setItem(SK + '_offline_pending', '1'); } catch(e) {}
 }
 
 // Marquer un champ comme modifié par le profil courant (pour Smart Merge)
@@ -2362,8 +2352,87 @@ function _fbOnSignedIn(user) {
     }
   }
   window.addEventListener('online',  function() { _updateNetworkBadge(); console.log('Firebase: Connexion r\u00e9tablie — sync en cours...'); });
-  window.addEventListener('offline', function() { _updateNetworkBadge(); console.log('Firebase: Mode hors-ligne activ\u00e9.'); });
+  window.addEventListener('offline', function() { _updateNetworkBadge(); _showConnectionBanner(false); console.log('Firebase: Mode hors-ligne activ\u00e9.'); });
   _updateNetworkBadge();
+
+  // ── Bannière hors-ligne / retour connexion ───────────────────────────────
+  function _showConnectionBanner(connected) {
+    var b = document.getElementById('connection-banner');
+    if (!b) return;
+    clearTimeout(_showConnectionBanner._timer);
+    if (connected) {
+      b.style.background = '#d1fae5'; b.style.color = '#065f46';
+      b.style.borderBottom = '2px solid #6ee7b7';
+      b.innerHTML = '\u2705 Connexion r\u00e9tablie \u2014 Synchronisation active avec Firebase';
+      b.style.display = 'block';
+      _showConnectionBanner._timer = setTimeout(function(){ b.style.display='none'; }, 4000);
+    } else {
+      b.style.background = '#fee2e2'; b.style.color = '#991b1b';
+      b.style.borderBottom = '2px solid #fca5a5';
+      b.innerHTML = '\u26a0\ufe0f Mode Hors-Ligne \u2014 Les modifications ne sont PAS enregistr\u00e9es';
+      b.style.display = 'block';
+    }
+  }
+  _showConnectionBanner._timer = null;
+
+  // ── Firebase .info/connected — état réseau temps réel ────────────────────
+  _fbDB.ref('.info/connected').on('value', function(snap) {
+    var ok = snap.val() === true;
+    console.log('Firebase .info/connected:', ok ? '\u2705 CONNECTÉ' : '\u26a0 DÉCONNECTÉ');
+    _updateNetworkBadge();
+    _showConnectionBanner(ok);
+  });
+
+  // ── Listener onValue equips — sync miroir instantanée (Standby, statut) ──
+  _fbDB.ref('atcdata/equips').on('value', function(snap) {
+    var remEquips = snap.val();
+    if (!remEquips || !Array.isArray(remEquips)) return;
+    var changed = false;
+    remEquips.forEach(function(re) {
+      if (!re || !re.id) return;
+      var le = APP.equips.find(function(e){ return e.id === re.id; });
+      if (!le) { if (!re.deleted) { APP.equips.push(re); changed = true; } }
+      else {
+        ['standby','statut','pieces','priority','desc','deleted'].forEach(function(f){
+          if (re[f] !== undefined && re[f] !== le[f]) { le[f] = re[f]; changed = true; }
+        });
+      }
+    });
+    if (changed) {
+      console.log('Firebase equips: sync instantan\u00e9e — ' + remEquips.length + ' \u00e9quipements');
+      autoRefreshUI();
+    }
+  }, function(err){ console.error('Firebase equips listener:', err.message); });
+
+  // ── Listener onValue planning — Top10 + daily en temps réel ─────────────
+  _fbDB.ref('atcdata/planning').on('value', function(snap) {
+    var rp = snap.val();
+    if (!rp) return;
+    var changed = false;
+    if (rp.top10ids && JSON.stringify(rp.top10ids) !== JSON.stringify(APP.planning.top10ids||[])) {
+      APP.planning.top10ids = rp.top10ids.slice(); changed = true;
+    }
+    if (rp.weekKey && rp.weekKey !== APP.planning.weekKey) {
+      APP.planning.weekKey = rp.weekKey; changed = true;
+    }
+    if (rp.daily) {
+      Object.keys(rp.daily).forEach(function(jour) {
+        if (!APP.planning.daily[jour]) APP.planning.daily[jour] = {};
+        Object.keys(rp.daily[jour]||{}).forEach(function(eid) {
+          var re = rp.daily[jour][eid];
+          if (re && JSON.stringify(APP.planning.daily[jour][eid]) !== JSON.stringify(re)) {
+            APP.planning.daily[jour][eid] = re; changed = true;
+          }
+        });
+      });
+    }
+    if (changed) {
+      console.log('Firebase planning: mise \u00e0 jour Top10 + daily');
+      autoRefreshUI();
+    }
+  }, function(err){ console.error('Firebase planning listener:', err.message); });
+
+
 
   // ── Étape 3 : Listener temps réel sur _ts ───────────────────
   _fbDB.ref('atcdata/_ts').on('value', function(snap) {
