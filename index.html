@@ -791,10 +791,8 @@ textarea{resize:vertical;min-height:60px}
     <div id="page-planning" class="page">
       <div class="flex aic jsb mb3">
         <div><div class="stitle" id="plan-week-title">Planning Hebdomadaire</div><div class="ts tg mt2" id="plan-week-dates"></div></div>
-        <div class="flex g2">
-          (ROLE === 'dm'
-            ? '<button class="btn bs sm" onclick="openM(\'m-equip\')">+ Équipement</button>'
-            : '<button class="btn bs sm" onclick="openAddToPlanningModal()">+ Ajouter au Planning</button>')
+        <div class="flex g2" id="plan-top-btns">
+          <span id="btn-add-equip-wrap"></span>
           <button class="btn bp sm" onclick="showPage('rapport')">Rapport</button>
         </div>
       </div>
@@ -817,7 +815,7 @@ textarea{resize:vertical;min-height:60px}
         <div class="stitle">Ordonnancement &amp; Priorites</div>
         <div class="flex g2">
           <button class="btn bp sm" onclick="autoOrd()">Ordonner Auto</button>
-          <button class="btn bs sm" onclick="_stampField('ord.criteriaOrder'); saveApp(); if (_fbReady && _fbDB) _fbWriteToCloud(); toast('Ordre sauvegardé.');">Sauvegarder</button>
+          <button class="btn bs sm" onclick="_stampField('ord.criteriaOrder'); saveApp(); if (_fbApp && _fbDB) _fbWriteToCloud(); toast('Ordre sauvegardé.');">Sauvegarder</button>
           <button class="btn bs sm" style="background:#0a1628;color:#fff;border-color:#0a1628;" onclick="openGanttModal()">&#128200; GANTT A4H</button>
         </div>
       </div>
@@ -1077,7 +1075,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v17.5';
+var APP_VERSION = 'v17.6';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1114,7 +1112,7 @@ var APP_CONFIG = {
 };
 
 // Instances Firebase (initialisées par _fbInit)
-var _fbApp = null, _fbAuth = null, _fbDB = null, _fbListener = null;
+var _fbApp = null, _fbAuth = null, _fbDB = null, _fbListener = null, _fbWriteDebounce = null;
 var _fbReady = false;  // true après initApp + auth
 var _fbInitRetries = 0; // compteur de tentatives de chargement Firebase
 
@@ -1725,8 +1723,13 @@ function _syncMerge(remote) {
           else {
             var rtaches = (remote.suiviTaches[wk][eid] || {}).taches || [];
             var ltaches = (lst[wk][eid] || {}).taches || [];
+            // Liste noire locale des tâches supprimées (survivent au merge)
+            var deletedIds = (lst[wk][eid]._deletedTaskIds) || [];
+
             var ltIds   = ltaches.map(function(t) { return t.id; });
             rtaches.forEach(function(rt) {
+              // Ne jamais restaurer une tâche supprimée localement
+              if (deletedIds.indexOf(rt.id) > -1) return;
               if (ltIds.indexOf(rt.id) === -1) {
                 ltaches.push(rt); changed = true;
               } else {
@@ -2556,7 +2559,7 @@ function _fbSetCloudBadge(status, label) {
 // Write APP to shared file
 function _syncWrite() {
   // ── Firebase First (Source unique de vérité) ─────────────
-  if (_fbReady && _fbDB) {
+  if (_fbApp && _fbDB) {
     _fbWriteToCloud();
     return;
   }
@@ -3234,7 +3237,7 @@ function openBaseLocale() {
 }
 
 function openSyncModal() {
-  if (_fbReady && _fbDB) {
+  if (_fbApp && _fbDB) {
     var userRaw = (_fbAuth && _fbAuth.currentUser) ? _fbAuth.currentUser.email : 'Inconnu';
     // On remplace l'underscore par un point juste pour l'affichage visuel
     var userDisplay = userRaw.replace(/_/g, '.');
@@ -3365,8 +3368,8 @@ function addTacheType() {
   APP.tacheTypes.push(val);
   _stampField('tacheTypes');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   showPage('admin');
   toast('✅ Type "' + val + '" ajouté.');
 }
@@ -3375,8 +3378,8 @@ function removeTacheType(val) {
   APP.tacheTypes = (APP.tacheTypes || []).filter(function(t){ return t !== val; });
   _stampField('tacheTypes');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   showPage('admin');
   toast('✅ Type "' + val + '" supprimé.');
 }
@@ -4102,7 +4105,7 @@ function savePriorityRule(fid, winner) {
   _stampField('priorityRules.' + fid);
   saveApp();
   // Pousser immédiatement vers Firebase pour que les 2 profils aient les mêmes règles
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   // Mettre à jour le badge de statut
   var statusEl = document.getElementById('pr-save-status');
   if (statusEl) {
@@ -4136,7 +4139,7 @@ function resetPriorityRules() {
   };
   _stampField('priorityRules');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   toast('\u21BA Règles de priorité réinitialisées aux valeurs par défaut.');
   if (typeof buildAdminPage === 'function') {
     var dynEl = document.getElementById('page-admin');
@@ -5451,7 +5454,7 @@ function toggleMP(eid, mk) {
   APP.masterplan[key] = cur === 'plan' ? 'done' : cur === 'done' ? '' : 'plan';
   _stampField('mp.cell.' + key);
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   renderMP();
   toast(APP.masterplan[key] === 'plan' ? 'Planifié' : APP.masterplan[key] === 'done' ? 'Marqué terminé' : 'Effacé');
 }
@@ -5473,6 +5476,13 @@ function switchPlan(day) {
 }
 
 function renderPlanning() {
+  // Injecter le bon bouton +Équipement selon le profil
+  var btnWrap = document.getElementById('btn-add-equip-wrap');
+  if (btnWrap) {
+    btnWrap.innerHTML = ROLE === 'dm'
+      ? '<button class="btn bs sm" onclick="openM(\'m-equip\')">+ Équipement</button>'
+      : '<button class="btn bs sm" onclick="openAddToPlanningModal()">+ Ajouter au Planning</button>';
+  }
   // Update dynamic week info
   var wi = getWeekInfo();
   var titleEl = document.getElementById('plan-week-title');
@@ -5655,19 +5665,35 @@ function autoGeneratePlanning() {
   APP.equips.forEach(function(e) {
     if (e.statut === 'OK') return;
 
-    // ── Critère 1 : Master Planning ce mois (+100 pts)
+    // ══════════════════════════════════════════════════════════
+    // SCORING TOP 10 — Algorithme révisé v17.5
+    // Principe: MP ce mois + Pièces disponibles + Priorité haute = TOP
+    // Un équipement SANS pièces disponibles ne peut pas primer sur un
+    // équipement AVEC pièces si ce dernier est dans le MP du mois courant
+    // ══════════════════════════════════════════════════════════
+
+    // ── Critère 1 : Master Planning ce mois (+100 pts = critère dominant)
     var mpKey = e.id + '_' + curMonth;
     var mpVal = APP.masterplan[mpKey] || '';
     var mpScore = (mpVal === 'plan') ? 100 : 0;
 
-    // ── Critère 2 : Pièces disponibles
-    var pieceScore = e.pieces === 'Disponible' ? 50 : e.pieces === 'Partiellement disponible' ? 30 : 0;
+    // ── Critère 2 : Pièces disponibles (BLOQUANT si non dispo + MP ce mois)
+    // Disponible=+60, Partiellement=+35, Non disponible=-30 (pénalité)
+    var pieceScore;
+    if (e.pieces === 'Disponible') {
+      pieceScore = 60;
+    } else if (e.pieces === 'Partiellement disponible') {
+      pieceScore = 35;
+    } else {
+      // Non disponible → pénalité si l'équipement n'a pas de travaux en cours
+      pieceScore = -30;
+    }
 
-    // ── Critère 3 : Priorité opérationnelle (1=critique → +32, 5=faible → +0)
+    // ── Critère 3 : Priorité opérationnelle (1=critique → +40, 5=faible → +0)
     var prio = e.priority || 3;
-    var prioScore = Math.max(0, 40 - prio * 8);
+    var prioScore = Math.max(0, 40 - (prio - 1) * 10); // 1→40, 2→30, 3→20, 4→10, 5→0
 
-    // ── Critère 4 : Travaux en cours (suivi tâches + saisie planning)
+    // ── Critère 4 : Travaux en cours — ANNULE la pénalité pièces si >25%
     var pct = computeEquipPct(e.id);
     var bestDayReal = 0;
     days.forEach(function(d) {
@@ -5675,13 +5701,20 @@ function autoGeneratePlanning() {
       if (dd[e.id] && dd[e.id].realisation) bestDayReal = Math.max(bestDayReal, parseInt(dd[e.id].realisation)||0);
     });
     var effectivePct = Math.max(pct, bestDayReal);
-    var realScore = (effectivePct >= 25 && effectivePct < 100) ? 20 : 0;
+    var realScore = 0;
+    if (effectivePct >= 75) { realScore = 40; } // Presque terminé → fort bonus
+    else if (effectivePct >= 25) { realScore = 25; pieceScore = Math.max(0, pieceScore); } // En cours → annule pénalité
+    else if (effectivePct > 0) { realScore = 10; }
     var inProgress = effectivePct > 0 && effectivePct < 100;
 
-    // ── Critère 5 : Instructions DM ciblant cet équipement (+15/instruction)
-    var dmScore = (APP.dm || []).filter(function(d){ return !d.executed && d.dest.toUpperCase().indexOf(e.code) !== -1; }).length * 15;
+    // ── Critère 5 : Instructions DM ciblant cet équipement (+20/instruction)
+    var dmScore = (APP.dm || []).filter(function(d){
+      return !d.executed && d.dest.toUpperCase().indexOf(e.code) !== -1;
+    }).length * 20;
 
     var total = mpScore + pieceScore + prioScore + realScore + dmScore;
+    // Score minimum = 0 (pas de score négatif total)
+    total = Math.max(0, total);
     candidates.push({ e: e, score: total, inProgress: inProgress, effectivePct: effectivePct });
   });
 
@@ -5763,7 +5796,7 @@ function autoGeneratePlanning() {
   _stampField('plan.generateTop10');
 
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   renderPlanDay(curPlanDay);
   var inProg = candidates.filter(function(c){ return c.inProgress && top10ids.indexOf(c.e.id)>-1; }).length;
   toast('\u26a1 Top 10 g\u00e9n\u00e9r\u00e9 : ' + top10ids.length + ' \u00e9quipements | ' + skipped + ' fig\u00e9(s) | ' + inProg + ' en cours conserv\u00e9(s).');
@@ -6021,7 +6054,7 @@ function addSuiviTache(eid) {
   taches.push(newTache);
   _stampField('suivi.addTask.' + eid + '.' + newTache.id);
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   if (nomEl) nomEl.value = '';
   if (descEl) descEl.value = '';
   refreshSuiviBlock(eid);
@@ -6037,9 +6070,14 @@ function delSuiviTache(eid, tid) {
   APP.suiviTaches[wk][eid].taches = (APP.suiviTaches[wk][eid].taches || []).filter(function(t) {
     return t.id !== tid;
   });
+  // Persister la liste noire pour éviter la restauration via _syncMerge
+  if (!APP.suiviTaches[wk][eid]._deletedTaskIds) APP.suiviTaches[wk][eid]._deletedTaskIds = [];
+  if (APP.suiviTaches[wk][eid]._deletedTaskIds.indexOf(tid) === -1) {
+    APP.suiviTaches[wk][eid]._deletedTaskIds.push(tid);
+  }
   _stampField('suivi.deleteTask.' + eid + '.' + tid);
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   refreshSuiviBlock(eid);
   toast('\u2705 T\u00e2che supprim\u00e9e.');
 }
@@ -6066,7 +6104,7 @@ function validateSuiviTache(eid, tid, isDone) {
     toast('⚠️ Attention : Le statut de ' + eq.code + ' est toujours OK. Veuillez le modifier manuellement dans le module Équipements si nécessaire.', 5000);
   }
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   refreshSuiviBlock(eid);
 }
 
@@ -6127,7 +6165,7 @@ function saveRHPicker() {
       t.rh = checked;
       _stampField('suivi.rh.' + _rhPickerEid + '.' + _rhPickerTid);
       saveApp();
-      if (_fbReady && _fbDB) _fbWriteToCloud();
+      if (_fbApp && _fbDB) _fbWriteToCloud();
     }
     var eid = _rhPickerEid;
     closeM('m-rh-picker');
@@ -6322,7 +6360,7 @@ function updAgentSupp(id, val) {
     a.supp = parseFloat(val)||0;
     _stampField('agent.' + id + '.supp');
     saveApp();
-    if (_fbReady && _fbDB) _fbWriteToCloud();
+    if (_fbApp && _fbDB) _fbWriteToCloud();
     toast('H.Supp mis à jour : ' + a.nom + ' → ' + val + 'h');
     renderChargeGlobale();
   }
@@ -6426,7 +6464,7 @@ function renderOrdList() {
           [1,2,3,4,5].map(function(n) { return '<option ' + ((e.priority||2)===n?'selected':'') + '>' + n + '</option>'; }).join('') +
         '</select>' +
         '<label style="font-size:10px;text-transform:none;font-weight:500;margin:0;color:var(--g600);">Pieces:</label>' +
-        '<select onchange="(function(id,v){var _eq2=APP.equips.find(function(eq){return eq.id===id});_eq2.pieces=v;_stampField(\'equip.\'+_eq2.code+\'.pieces\');saveApp();renderOrdList();if(typeof filterEq===\'function\'){try{filterEq();}catch(e){}};})(\''+e.id+'\',this.value)" style="font-size:10px;padding:2px;">' +
+        '<select onchange="(function(id,v){var _eq2=APP.equips.find(function(eq){return eq.id===id});_eq2.pieces=v;_stampField(\'equip.\'+_eq2.code+\'.pieces\');_stampField(\'equip.pieces\');saveApp();renderOrdList();if(typeof filterEq===\'function\'){try{filterEq();}catch(e){}};})(\''+e.id+'\',this.value)" style="font-size:10px;padding:2px;">' +
           ['Disponible','Partiellement disponible','Non disponible'].map(function(p) { return '<option ' + ((e.pieces||'Non disponible')===p?'selected':'') + '>' + p + '</option>'; }).join('') +
         '</select>' +
       '</div>' +
@@ -6494,7 +6532,7 @@ function cycleStatus(id) {
   _stampField('equip.' + e.code + '.statut');
   APP.hist.unshift({ id:'h'+Date.now(), date:new Date().toISOString().split('T')[0], code:e.code, famille:e.famille, type:'ENTRETIEN', desc:'Statut change vers ' + e.statut, statut:e.statut, realisation:0 });
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   filterEq();
   toast(e.code + ' → ' + e.statut);
 }
@@ -6505,7 +6543,7 @@ function delEquip(id) {
   if (e) {
     if (!APP._deletedEquipIds) APP._deletedEquipIds = [];
     if (APP._deletedEquipIds.indexOf(id) === -1) APP._deletedEquipIds.push(id);
-    if (_fbReady && _fbDB) {
+    if (_fbApp && _fbDB) {
       _fbDB.ref('atcdata/_deletedEquips/' + sanitizeKey(id)).set({
         id: id, code: e.code, deletedAt: Date.now(), deletedBy: ROLE
       });
@@ -6515,7 +6553,7 @@ function delEquip(id) {
     _stampSection('equips');
   }
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   filterEq();
   toast('\u2705 \u00c9quipement supprim\u00e9 et synchronis\u00e9.');
 }
@@ -6558,7 +6596,7 @@ function saveEquip() {
   _stampField('equip.' + code + '.create');
   _stampSection('equips');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   closeM('m-equip');
   toast(code + ' ajouté.');
   filterEq();
@@ -6616,7 +6654,7 @@ function updAgent(id, field, val) {
   // Timestamp pour Smart Merge — traçabilité de la modification
   _stampField('agent.' + id + '.' + field);
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   renderRH();
 }
 function delAgent(id) {
@@ -6628,7 +6666,7 @@ function delAgent(id) {
 
   // 2. Écrire le flag deleted dans Firebase DIRECTEMENT (nœud /atcdata/_deletedAgents)
   //    → l'autre profil lira ce nœud et ne restaurera jamais cet agent
-  if (_fbReady && _fbDB) {
+  if (_fbApp && _fbDB) {
     _fbDB.ref('atcdata/_deletedAgents/' + sanitizeKey(id)).set({
       id: id, deletedAt: Date.now(), deletedBy: ROLE || 'dm'
     });
@@ -6640,7 +6678,7 @@ function delAgent(id) {
   // 4. Sauvegarder et pousser immédiatement
   _stampField('agent.deleted.' + id);
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   renderRH();
   toast('\u2705 Agent supprimé définitivement.');
 }
@@ -6656,7 +6694,7 @@ function saveAgent() {
   _stampField('agent.' + newAgent.id + '.actif');
   _stampSection('agents');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   closeM('m-agent');
   toast('Agent ajouté.');
   renderRH();
@@ -6743,7 +6781,7 @@ function markDone(id, val) {
     d.executed = val;
     _stampField('dm.' + id + '.executed');
     saveApp();
-    if (_fbReady && _fbDB) _fbWriteToCloud();
+    if (_fbApp && _fbDB) _fbWriteToCloud();
     renderDMPage();
   }
 }
@@ -6759,7 +6797,7 @@ function addDMComment(id, c) {
     if (!APP.fieldTs) APP.fieldTs = {};
     _stampField('dm.' + id + '.comment');
     saveApp();
-    if (_fbReady && _fbDB) _fbWriteToCloud();
+    if (_fbApp && _fbDB) _fbWriteToCloud();
   }
 }
 function delDM(id) {
@@ -6767,7 +6805,7 @@ function delDM(id) {
   APP.dm = APP.dm.filter(function(d){return d.id!==id;});
   _stampField('dm.deleteInstruction.' + id);
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   renderDMPage();
 }
 function saveDM() {
@@ -6779,7 +6817,7 @@ function saveDM() {
   _stampField('dm.' + newInstr.id + '.text');
   _stampSection('dm_inst');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   closeM('m-dm');
   document.getElementById('nd-text').value = '';
   document.getElementById('nd-dest').value = '';
@@ -6822,7 +6860,7 @@ function addCL() {
   e.checklist.push({ text:txt, done:false, doneAt:null, createdAt:new Date().toISOString() });
   _stampField('equip.' + (e.code||e.id) + '.checklist');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   renderCL(e);
   input.value = '';
 }
@@ -6833,7 +6871,7 @@ function togCL(eid, i, done) {
   e.checklist[i].doneAt = done ? new Date().toISOString() : null;
   _stampField('equip.' + (e.code||e.id) + '.checklist.' + i);
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   renderCL(e);
 }
 function delCL(eid, i) {
@@ -7539,7 +7577,7 @@ function confirmAddToPlanning() {
 
   _stampSection('planning');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   closeM('m-add-planning');
   renderPlanDay(curPlanDay);
   toast('\u2705 ' + checked.length + ' \u00e9quipement(s) ajout\u00e9(s) au planning.');
@@ -7627,7 +7665,7 @@ function lockAndSavePriorityRules() {
   _stampField('priorityRules');
   saveApp();
   // Pousser IMMÉDIATEMENT vers Firebase (push sans debounce)
-  if (_fbReady && _fbDB && _fbAuth && _fbAuth.currentUser) {
+  if (_fbApp && _fbDB && _fbAuth && _fbAuth.currentUser) {
     var raw = JSON.parse(_syncPayload());
     var payload = JSON.parse(JSON.stringify(raw, function(k,v){
       if(v&&typeof v==='object'&&!Array.isArray(v)){var r={};for(var key in v){r[sanitizeKey(key)]=v[key];}return r;}
@@ -7901,7 +7939,7 @@ function addFamily() {
   APP.familles.sort();
   _stampField('famille.edit');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   inp.value = '';
   var dynEl = document.getElementById('page-admin');
   if (dynEl) dynEl.innerHTML = buildAdminPage();
@@ -7913,7 +7951,7 @@ function removeFamily(fam) {
   APP.familles = (APP.familles || []).filter(function(f){ return f !== fam; });
   _stampField('famille.edit');
   saveApp();
-  if (_fbReady && _fbDB) _fbWriteToCloud();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
   var dynEl = document.getElementById('page-admin');
   if (dynEl) dynEl.innerHTML = buildAdminPage();
   toast('✅ Famille supprimée : ' + fam);
