@@ -662,14 +662,26 @@ textarea{resize:vertical;min-height:60px}
       </div>
     </div>
 
-    <div class="role-row">
-      <div class="rb sel" id="rb-chef" onclick="selRole('chef')"><span class="ri">&#128295;</span><span class="rn">Chef d'Atelier</span></div>
-      <div class="rb" id="rb-dm" onclick="selRole('dm')"><span class="ri">&#128084;</span><span class="rn">Dir. Mat&eacute;riel</span></div>
+    <!-- ── Login 2 étapes (Étape 1 : Email) ─────────────────── -->
+    <div id="login-step1">
+      <div style="font-size:11px;color:#64748b;text-align:center;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Connexion locale</div>
+      <input type="email" id="lemail" class="linput" placeholder="Votre email (ex: dm@soseter.sn)"
+        autocomplete="email" style="margin-bottom:6px;"
+        onkeydown="if(event.key==='Enter')loginStep1()">
+      <div id="lerr-email" class="lerr" style="display:none;">&#10060; Email non reconnu dans le système.</div>
+      <button class="lbtn" id="btn-step1" onclick="loginStep1()">Continuer &#8594;</button>
     </div>
-    <div id="lerr" class="lerr">Mot de passe incorrect.</div>
-    <input type="password" id="lpw" class="linput" placeholder="Mot de passe...">
-    <button class="lbtn" onclick="doLogin()">Se Connecter</button>
-    <div class="lhint">Chef d'Atelier : <strong>CHEF2026</strong> &nbsp;|&nbsp; DM : <strong>DM2026</strong></div>
+    <!-- ── Étape 2 : Mot de passe ─────────────────────────── -->
+    <div id="login-step2" style="display:none;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <button onclick="loginBackStep1()" style="background:none;border:none;cursor:pointer;color:#64748b;font-size:20px;padding:0;line-height:1;" title="Changer de compte">&#8592;</button>
+        <div id="lemail-display" style="font-size:12px;color:#1e40af;font-weight:700;flex:1;"></div>
+      </div>
+      <div id="lerr" class="lerr" style="display:none;">&#10060; Mot de passe incorrect.</div>
+      <input type="password" id="lpw" class="linput" placeholder="Mot de passe..."
+        autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+      <button class="lbtn" onclick="doLogin()">&#128275; Se Connecter</button>
+    </div>
     <div style="margin-top:14px;text-align:center;" class="app-signature">Cr&eacute;&eacute; par F.SEYE &mdash; Asset Manager &mdash; <span id="login-version"></span></div>
   </div>
 </div>
@@ -1078,7 +1090,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v18.1';
+var APP_VERSION = 'v18.2';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1249,7 +1261,7 @@ function _idbGet(key, cb) {
     if (!r) {
       _idbGet(SK, function(val) {
         if (val && !localStorage.getItem(SK)) {
-          try { localStorage.setItem(SK, val); } catch(e) {}
+          /* Full Online: pas de localStorage pour données métier */
           try { sessionStorage.setItem(SK, val); } catch(e) {}
           var d = JSON.parse(val);
           if (d && d.equips) {
@@ -2520,16 +2532,19 @@ function _fbSignIn() {
 
   var btn = document.getElementById('btn-google');
   if (btn) { btn.disabled = true; btn.style.opacity = '0.7'; }
-  // Afficher l'email mémorisé dans le bouton Google si disponible
+  // Pré-remplir l'email mémorisé (Google ou local)
   try {
-    var savedEmail = localStorage.getItem('_dm_saved_google_email');
-    if (savedEmail && btn) {
-      var emailDisplay = savedEmail.length > 28 ? savedEmail.substring(0,25)+'...' : savedEmail;
-      btn.innerHTML = '<span style="font-size:18px;margin-right:8px;">G</span> Se connecter (' + emailDisplay + ')';
-      // Afficher un lien pour changer de compte
+    var savedGEmail = localStorage.getItem('_dm_saved_google_email');
+    if (savedGEmail && btn) {
+      var emailDisplay = savedGEmail.length > 28 ? savedGEmail.substring(0,25)+'...' : savedGEmail;
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" style="margin-right:6px"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>' + emailDisplay;
       var changeLink = document.getElementById('change-google-account');
       if (changeLink) changeLink.style.display = 'inline';
     }
+    // Pré-remplir email local mémorisé
+    var savedLEmail = localStorage.getItem('_dm_saved_local_email');
+    var emailInp = document.getElementById('lemail');
+    if (savedLEmail && emailInp) emailInp.value = savedLEmail;
   } catch(e) {}
 
   var provider = new firebase.auth.GoogleAuthProvider();
@@ -2799,7 +2814,7 @@ function _syncReadFSAPI() {
     var changed = _syncMerge(remote);
     if (changed) {
       var j = JSON.stringify(APP);
-      try { localStorage.setItem(SK, j); } catch(e) {}
+      /* Full Online: pas de localStorage pour données métier */
       try { sessionStorage.setItem(SK, j); } catch(e) {}
       _idbSave(SK, j);
       _syncRefreshView();
@@ -3866,6 +3881,8 @@ function _applyLogin(role, saveSession) {
   if (ROLE === 'dm') {
     // Publier la date de référence pour synchroniser DM et Chef
     setTimeout(_fbPublishRefDate, 2000);
+    // DM: charger les permissions ET les pousser si absentes
+    setTimeout(function(){ _loadDynPermissions(); setTimeout(_initDynPermissions, 2000); }, 500);
     // Masquer les badges non pertinents en mode Full Online DM
     ['sync-badge','db-badge','offline-badge'].forEach(function(id){
       var el=document.getElementById(id); if(el) el.style.display='none';
@@ -3878,6 +3895,8 @@ function _applyLogin(role, saveSession) {
   } else {
     // Chef lit la date de référence publiée par le DM
     setTimeout(_fbReadRefDate, 1500);
+    // Chef: écouter les permissions en temps réel → droits s'activent/désactivent
+    setTimeout(_loadDynPermissions, 1000);
     document.getElementById('rbadge').className = 'rbadge bchef';
     document.getElementById('rbadge').innerHTML = '&#128295; Chef d\'Atelier';
     document.getElementById('topav').className = 'uav av-chef';
@@ -3947,24 +3966,81 @@ function _applyLogin(role, saveSession) {
 
 } // fin _applyLogin
 
+// ── Emails locaux autorisés ──────────────────────────────────
+// Même mapping que FIREBASE_AUTH_EMAILS mais pour connexion locale
+var LOCAL_EMAIL_MAP = {};  // Rempli au login depuis FIREBASE_AUTH_EMAILS
+
+function loginEmailInput() {
+  var err = document.getElementById('lerr-email');
+  if (err) err.style.display = 'none';
+}
+
+function loginStep1() {
+  var email = (document.getElementById('lemail').value || '').trim().toLowerCase();
+  if (!email) return;
+
+  // Vérifier l'email dans la map des profils autorisés
+  var role = null;
+  Object.keys(FIREBASE_AUTH_EMAILS).forEach(function(k){
+    if (k.toLowerCase() === email) role = FIREBASE_AUTH_EMAILS[k];
+  });
+
+  if (!role) {
+    var errEl = document.getElementById('lerr-email');
+    if (errEl) { errEl.style.display='block'; }
+    return;
+  }
+  // Email reconnu → passer à l'étape 2
+  selRoleVal = role;
+  // Mémoriser l'email pour Google et réutilisation
+  try { localStorage.setItem('_dm_saved_local_email', email); } catch(e) {}
+  // Afficher étape 2
+  document.getElementById('login-step1').style.display = 'none';
+  document.getElementById('login-step2').style.display = 'block';
+  var disp = document.getElementById('lemail-display');
+  var roleLabel = role === 'dm' ? '&#128084; Directeur Matériel' : '&#128295; Chef d\'Atelier';
+  if (disp) disp.innerHTML = email + ' &nbsp;<span style="color:#6b7280;font-weight:400;">(' + roleLabel + ')</span>';
+  setTimeout(function(){ var pw=document.getElementById('lpw'); if(pw) pw.focus(); }, 100);
+}
+
+function loginBackStep1() {
+  document.getElementById('login-step2').style.display = 'none';
+  document.getElementById('login-step1').style.display = 'block';
+  var errEl = document.getElementById('lerr');
+  if (errEl) errEl.style.display = 'none';
+  var pw = document.getElementById('lpw');
+  if (pw) pw.value = '';
+  setTimeout(function(){ var em=document.getElementById('lemail'); if(em) em.focus(); }, 100);
+}
+
+function loginForgotPW() {
+  toast('\u26a0 Contactez le Directeur Matériel pour réinitialiser le mot de passe.', 5000);
+}
+
 function doLogin() {
-  var pw = document.getElementById('lpw').value;
-  var ok = selRoleVal === 'dm' ? pw === APP.pw.dm : pw === APP.pw.chef;
-  if (ok) {
-    document.getElementById('lpw').value = '';
-    _applyLogin(selRoleVal, true);
-    // Tenter d'initialiser Firebase en arrière-plan (si SDK chargé)
-    // pour permettre la sync même avec connexion locale
-    setTimeout(function() {
-      if (!_fbApp && typeof firebase !== 'undefined') {
-        try { _fbInit(); } catch(e) {}
-      }
-    }, 500);
-  } else {
-    document.getElementById('lerr').style.display = 'block';
+  var pw   = (document.getElementById('lpw').value || '').trim();
+  var errEl = document.getElementById('lerr');
+
+  // Vérifier le mot de passe selon le rôle détecté à l'étape 1
+  var expectedPw = selRoleVal === 'dm' ? (APP.pw ? APP.pw.dm : 'DM2026')
+                                       : (APP.pw ? APP.pw.chef : 'CHEF2026');
+  if (!pw || pw !== expectedPw) {
+    if (errEl) errEl.style.display = 'block';
     document.getElementById('lpw').value = '';
     document.getElementById('lpw').focus();
+    return;
   }
+
+  if (errEl) errEl.style.display = 'none';
+  document.getElementById('lpw').value = '';
+  _applyLogin(selRoleVal, true);
+
+  // Initialiser Firebase si pas encore fait
+  setTimeout(function() {
+    if (!_fbApp && typeof firebase !== 'undefined') {
+      try { _fbInit(); } catch(e) {}
+    }
+  }, 500);
 }
 
 function doLogout() {
@@ -4002,28 +4078,23 @@ function confirmDMAuth() {
 function savePW() {
   var nc = document.getElementById('pw-chef').value.trim();
   var nd = document.getElementById('pw-dm').value.trim();
+  if (nc.length > 0 && nc.length < 4) { toast('\u26a0 Mot de passe trop court (min 4 caractères).'); return; }
+  if (nd.length > 0 && nd.length < 4) { toast('\u26a0 Mot de passe trop court (min 4 caractères).'); return; }
   if (nc) APP.pw.chef = nc;
-  if (nd) APP.pw.dm = nd;
+  if (nd) APP.pw.dm   = nd;
+  _stampField('pw');
   saveApp();
+  // ── Push Firebase immédiat : le Chef verra le nouveau mdp au prochain login ──
+  if (_fbApp && _fbDB && _fbAuth && _fbAuth.currentUser) {
+    _fbDB.ref('atcdata/pw').update({ dm: APP.pw.dm, chef: APP.pw.chef }).then(function(){
+      console.log('Firebase: mots de passe mis à jour sur le serveur');
+    }).catch(function(e){ console.warn('pw update:', e.message); });
+  }
   closeM('m-pw');
-  toast('Mots de passe mis a jour.');
+  toast('\u2705 Mots de passe mis à jour et synchronisés avec Firebase.');
   document.getElementById('pw-chef').value = '';
   document.getElementById('pw-dm').value = '';
 }
-
-// ============================================================
-// NAVIGATION
-// ============================================================
-var PTITLES = {
-  dashboard:'Dashboard', masterplan:'Master Planning 6 Mois — v8', planning:'Planning Hebdomadaire',
-  ord:'Ordonnancement', equips:'Parc Equipements', rh:'Personnel / RH',
-  dm:'Instructions DM', hist:'Historique', rapport:'Rapport Hebdomadaire',
-  guide:'Guide d\'Utilisation', admin:'Gestion Base de Données',
-  suivi:'Suivi des Tâches'
-};
-
-// v5: Plan lock — synchronisé via Firebase dans APP.masterplanLocked
-// MP_LOCKED remplacé par isMPLocked() pour éviter le conflit Object.defineProperty
 function isMPLocked() { return !!(APP && APP.masterplanLocked); }
 
 function showPage(pg) {
@@ -7405,7 +7476,7 @@ setInterval(function() { saveApp(); }, 30000);
 
 // Save before leaving (best-effort)
 window.addEventListener('beforeunload', function() {
-  try { localStorage.setItem(SK, JSON.stringify(APP)); } catch(e) {}
+  /* Full Online: pas de localStorage pour données métier */
   try { sessionStorage.setItem(SK, JSON.stringify(APP)); } catch(e) {}
 });
 
@@ -7946,6 +8017,8 @@ function lockAndSavePriorityRules() {
   APP.priorityRulesLockedBy = ROLE;
   _stampField('priorityRules');
   saveApp();
+  // ── Push immédiat vers app_settings/permissions (temps réel Chef) ──
+  _saveDynPermissions();
   // Pousser IMMÉDIATEMENT vers Firebase (push sans debounce)
   if (_fbApp && _fbDB && _fbAuth && _fbAuth.currentUser) {
     var raw = JSON.parse(_syncPayload());
@@ -8008,6 +8081,61 @@ function _fbReadRefDate() {
 function _getRefNow() {
   // Retourne le timestamp de référence (DM publie, Chef lit)
   return _fbRefDate || Date.now();
+}
+
+
+// ════════════════════════════════════════════════════════════════
+// PERMISSIONS DYNAMIQUES — app_settings/permissions
+// Le DM configure les droits depuis "Gestion Base"
+// Firebase pousse les changements → Chef voit les boutons s'activer/désactiver
+// ════════════════════════════════════════════════════════════════
+var _dynPerms = null; // Cache local des permissions Firebase
+
+function _loadDynPermissions() {
+  if (!_fbDB) return;
+  _fbDB.ref('app_settings/permissions').on('value', function(snap) {
+    var p = snap.val();
+    if (!p) {
+      // Créer les permissions par défaut si absentes
+      _initDynPermissions();
+      return;
+    }
+    _dynPerms = p;
+    console.log('Firebase: permissions chargées depuis app_settings/permissions');
+    // Mettre à jour les règles de priorité locales si Firebase en a
+    if (p.priorityRules && typeof p.priorityRules === 'object') {
+      Object.keys(p.priorityRules).forEach(function(k){
+        APP.priorityRules[k] = p.priorityRules[k];
+      });
+    }
+    // Rafraîchir l'UI pour activer/désactiver les boutons selon les droits
+    autoRefreshUI();
+    // Mettre à jour le rendu des règles si le module est visible
+    try { if (typeof renderPriorityRulesUI === 'function') renderPriorityRulesUI(); } catch(e) {}
+  }, function(err){ console.warn('app_settings/permissions:', err.message); });
+}
+
+function _initDynPermissions() {
+  if (!_fbDB || ROLE !== 'dm') return;
+  // Publier les permissions par défaut dans Firebase
+  var defaults = { priorityRules: APP.priorityRules, updatedBy:'dm', updatedAt: Date.now() };
+  _fbDB.ref('app_settings/permissions').set(defaults).then(function(){
+    console.log('Firebase: permissions par défaut publiées dans app_settings/permissions');
+  }).catch(function(e){ console.warn('permissions init:', e.message); });
+}
+
+function _saveDynPermissions() {
+  // DM sauvegarde les règles modifiées → push immédiat Firebase → Chef voit les changements
+  if (!_fbDB || ROLE !== 'dm') return;
+  if (!APP.priorityRules) return;
+  var payload = { priorityRules: APP.priorityRules, updatedBy:'dm', updatedAt: Date.now() };
+  _fbDB.ref('app_settings/permissions').update(payload).then(function(){
+    console.log('Firebase: permissions mises à jour et poussées vers tous les profils');
+    toast('\u2705 Règles de priorité sauvegardées et partagées avec le Chef d\'Atelier.');
+  }).catch(function(e){
+    console.error('permissions save:', e.message);
+    toast('\u26a0 Erreur lors de la sauvegarde des permissions.');
+  });
 }
 
 // Init sync badge
