@@ -1075,7 +1075,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v17.7';
+var APP_VERSION = 'v17.8';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1663,7 +1663,8 @@ function _syncMerge(remote) {
       var remWkTs  = (remote._fieldTs && remote._fieldTs['plan.generateTop10']) || 0;
       var locWkTs  = (APP.fieldTs     && APP.fieldTs['plan.generateTop10'])     || 0;
       // DM prioritaire sur le Top10 — si le remote est plus récent, on applique
-      if (remWkTs >= locWkTs || remote._by === 'dm') {
+      // Dernière génération gagne (DM ou Chef) — comparer timestamps
+    if (remWkTs > locWkTs) {
         if (APP.planning.weekKey !== remote.planning.weekKey) {
           APP.planning.weekKey  = remote.planning.weekKey;
           changed = true;
@@ -3568,7 +3569,7 @@ if (!APP.priorityRules) {
     'ord.pieces':            'chef',
     // ── Planning Hebdo ──────────────────────────────────────────
     'plan.included':         'dm',    // DM construit le Top10
-    'plan.generateTop10':    'dm',    // Génération Top10 = DM exclusif
+    'plan.generateTop10':    'both',  // Génération partagée — dernier timestamp gagne
     'plan.frozen':           'dm',    // Seul le DM peut figer
     'plan.agent':            'chef',  // Chef affecte les agents
     'plan.realisation':      'chef',  // Chef saisit l'avancement réel
@@ -4124,7 +4125,7 @@ function resetPriorityRules() {
   // Forcer la réinitialisation
   APP.priorityRules = {
     'equip.statut':'chef','equip.pieces':'chef','equip.priority':'dm',
-    'equip.desc':'dm','equip.anomalies':'chef','equip.create':'dm','equip.delete':'dm','equip.deleted':'dm','equip.standby':'chef',
+    'equip.desc':'dm','equip.anomalies':'chef','equip.create':'dm','equip.delete':'dm','equip.deleted':'dm','equip.standby':'dm',
     'ord.criteriaOrder':'dm','ord.priority':'dm','ord.pieces':'chef',
     'plan.included':'dm','plan.generateTop10':'dm','plan.frozen':'dm',
     'plan.agent':'chef','plan.realisation':'chef','plan.commentaire':'chef',
@@ -5516,10 +5517,9 @@ function renderPlanDay(day) {
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
     '<div class="ts tg">' + planned.length + '/10 équipement(s) &mdash; <span style="font-size:10px;color:var(--g400);">Max 10 recommandé</span></div>' +
-    (ROLE === 'dm'
-    ? '<button class="btn bp sm" onclick="autoGeneratePlanning()" style="font-size:10px;">⚡ Générer Top 10</button>'
-    : '<span style="font-size:10px;color:var(--g400);font-style:italic;">Le Top 10 est généré par le Dir. Matériel.</span>'
-  ) + '</div>';
+    '<button class="btn bp sm" onclick="autoGeneratePlanning()" style="font-size:10px;" ' +
+    'title="Génère le Top 10 — DM et Chef peuvent générer. Dernière génération partagée sur les 2 profils.">⚡ Générer Top 10</button>' +
+  '</div>';
   if (!planned.length) h += '<div class="al ai">Aucun équipement. Cliquez "Générer depuis MP" ou ajoutez manuellement ci-dessous.</div>';
   planned.forEach(function(e) {
     var d = dayData[e.id] || {};
@@ -5626,11 +5626,9 @@ function saveRealisationPlan(day, eid, val) {
 }
 
 function autoGeneratePlanning() {
-  // Guard : seul le DM peut générer le Top 10
-  if (ROLE !== 'dm') {
-    toast('\u26d4 Seul le Directeur Mat\u00e9riel peut g\u00e9n\u00e9rer le Top 10.');
-    return;
-  }
+  // Les 2 profils peuvent générer le Top 10 (priorité partagée — dernier timestamp gagne)
+  // Le résultat est synchronisé via Firebase vers l'autre profil
+  _stampField('plan.generateTop10');  // timestamp de génération
   /*
    * ────────────────────────────────────────────────────────────────
    * ALGORITHME "TOP 10" — LOGIQUE DE PONDÉRATION (v14)
@@ -5731,9 +5729,10 @@ function autoGeneratePlanning() {
     });
   });
 
-  // Équipements en cours de réalisation (>0%) : garantis dans le Top 10
+  // Équipements en cours SIGNIFICATIFS (≥25%) : priorité dans le Top 10
+  // NOTE: un équipement avec 1% de réalisation mais sans pièces NE doit PAS être garanti
   var inProgressIds = candidates
-    .filter(function(c){ return c.inProgress; })
+    .filter(function(c){ return c.inProgress && c.effectivePct >= 25; })
     .map(function(c){ return c.e.id; });
 
   // Construction du Top 10 : frozen → inProgress → meilleurs scores
@@ -6459,19 +6458,25 @@ function renderOrdList() {
         '</div>' +
         '<div class="tx tg trunc" style="max-width:380px;">' + e.desc.substring(0,65) + '</div>' +
       '</div>' +
-      '<div style="display:flex;gap:5px;align-items:center;">' +
-        '<label style="font-size:10px;text-transform:none;font-weight:500;margin:0;color:var(--g600);">Priorite:</label>' +
-        '<select onchange="(function(id,v){var _eq=APP.equips.find(function(eq){return eq.id===id});var _pv=parseInt(v);if(!isNaN(_pv)&&_pv>=1&&_pv<=5){_eq.priority=_pv;_stampField("equip."+_eq.code+".priority");saveApp();renderOrdList()};})(\''+e.id+'\',this.value)" style="font-size:10px;padding:2px;width:55px;">' +
-          [1,2,3,4,5].map(function(n) { return '<option value="' + n + '" ' + ((parseInt(e.priority)||3)===n?'selected':'') + '>' + n + '</option>'; }).join('') +
-        '</select>' +
-        '<label style="font-size:10px;text-transform:none;font-weight:500;margin:0;color:var(--g600);">Pieces:</label>' +
-        '<select onchange="(function(id,v){var _eq2=APP.equips.find(function(eq){return eq.id===id});_eq2.pieces=v;_stampField(\'equip.\'+_eq2.code+\'.pieces\');_stampField(\'equip.pieces\');saveApp();renderOrdList();if(typeof filterEq===\'function\'){try{filterEq();}catch(e){}};})(\''+e.id+'\',this.value)" style="font-size:10px;padding:2px;">' +
-          ['Disponible','Partiellement disponible','Non disponible'].map(function(p) { return '<option ' + ((e.pieces||'Non disponible')===p?'selected':'') + '>' + p + '</option>'; }).join('') +
-        '</select>' +
-        (ROLE === 'chef'
-          ? '<button onclick="toggleStandby(\'' + e.id + '\')" style="font-size:9px;padding:2px 8px;border-radius:10px;border:1px solid ' + (e.standby?'#ef4444':'#d1d5db') + ';background:' + (e.standby?'#fee2e2':'#f9fafb') + ';color:' + (e.standby?'#dc2626':'#6b7280') + ';cursor:pointer;font-weight:600;margin-left:4px;" title="Standby: exclure du Top 10 (attente pièces)">' + (e.standby ? '⏸ Standby actif' : '▶ Actif') + '</button>'
-          : (e.standby ? '<span style="font-size:9px;color:#dc2626;font-weight:700;margin-left:4px;">⏸ Standby DM</span>' : '')) +
-      '</div>' +
+      (ROLE === 'dm'
+        ? ('<div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">' +
+          '<label style="font-size:10px;font-weight:500;margin:0;color:var(--g600);">Priorité:</label>' +
+          '<select onchange="(function(id,v){var _eq=APP.equips.find(function(eq){return eq.id===id});var _pv=parseInt(v);if(!isNaN(_pv)&&_pv>=1&&_pv<=5){_eq.priority=_pv;_stampField(\'equip.\'+_eq.code+\'.priority\');_stampField(\'equip.priority\');saveApp();renderOrdList();}})(\''+e.id+'\',this.value)" style="font-size:10px;padding:2px;width:50px;accent-color:var(--b5);">' +
+          [1,2,3,4,5].map(function(n){return '<option value="'+n+'" '+(((parseInt(e.priority)||3)===n)?'selected':'')+'>'+n+'</option>';}).join('') +
+          '</select>' +
+          '<label style="font-size:10px;font-weight:500;margin:0;color:var(--g600);">Pièces:</label>' +
+          '<select onchange="(function(id,v){var _eq2=APP.equips.find(function(eq){return eq.id===id});_eq2.pieces=v;_stampField(\'equip.\'+_eq2.code+\'.pieces\');_stampField(\'equip.pieces\');saveApp();renderOrdList();})(\''+e.id+'\',this.value)" style="font-size:10px;padding:2px;">' +
+          ['Disponible','Partiellement disponible','Non disponible'].map(function(v){return '<option '+(e.pieces===v?'selected':'')+'>'+v+'</option>';}).join('') +
+          '</select>' +
+          (e.standby
+            ? '<button onclick="toggleStandby(\''+e.id+'\')" style="font-size:9px;padding:2px 8px;border-radius:10px;background:#7c3aed;color:#fff;border:none;cursor:pointer;">▶ Sortir Standby</button>'
+            : '<button onclick="toggleStandby(\''+e.id+'\''+')" style="font-size:9px;padding:2px 8px;border-radius:10px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;cursor:pointer;">⏸ Standby</button>') +
+          '</div>')
+        : ('<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+          '<span style="font-size:10px;color:var(--g500);">Prio: <strong>' + (e.priority||3) + '</strong></span>' +
+          '<span class="badge '+(e.pieces==='Disponible'?'bok':e.pieces==='Partiellement disponible'?'bblue':'bgray')+'" style="font-size:9px;">' + (e.pieces||'Non disponible') + '</span>' +
+          (e.standby ? '<span style="background:#7c3aed;color:#fff;font-size:9px;padding:1px 6px;border-radius:8px;">STANDBY</span>' : '') +
+          '</div>')) +
     '</div>';
   }).join('');
 }
@@ -7969,8 +7974,8 @@ function removeFamily(fam) {
 // Exclut du Top 10 jusqu'à disponibilité des pièces
 // ════════════════════════════════════════════════════════════════
 function toggleStandby(eid) {
-  if (ROLE !== 'chef') {
-    toast('\u26d4 Le mode Standby est r\u00e9serv\u00e9 au Chef d\'Atelier.');
+  if (ROLE !== 'dm') {
+    toast('\u26d4 Le mode Standby est r\u00e9serv\u00e9 au Directeur Mat\u00e9riel.');
     return;
   }
   var e = APP.equips.find(function(eq){ return eq.id === eid; });
