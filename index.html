@@ -1090,7 +1090,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v18.2';
+var APP_VERSION = 'v18.3';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -2211,9 +2211,9 @@ function _fbInit() {
     }
 
     // Niveau 1 : LOCAL (localStorage — optimal)
-    _fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+    _fbAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION)
       .then(function() {
-        console.log('Firebase: persistance LOCAL activée.');
+        console.log('Firebase: persistance SESSION activée.');
         _proceedAfterPersistence();
       })
       .catch(function(e1) {
@@ -3796,8 +3796,11 @@ var dmAuthCB = null;
 
 function selRole(r) {
   selRoleVal = r;
-  document.getElementById('rb-chef').classList.toggle('sel', r === 'chef');
-  document.getElementById('rb-dm').classList.toggle('sel', r === 'dm');
+  // rb-chef et rb-dm sont absents dans le login 2 étapes — gestion défensive
+  var rbC = document.getElementById('rb-chef');
+  var rbD = document.getElementById('rb-dm');
+  if (rbC) rbC.classList.toggle('sel', r === 'chef');
+  if (rbD) rbD.classList.toggle('sel', r === 'dm');
 }
 
 // ============================================================
@@ -4096,6 +4099,14 @@ function savePW() {
   document.getElementById('pw-dm').value = '';
 }
 function isMPLocked() { return !!(APP && APP.masterplanLocked); }
+
+// ── Titres des modules (PTITLES) ──────────────────────────────────
+var PTITLES = {
+  dashboard:'Dashboard', masterplan:'Master Planning 6 Mois', planning:'Planning Hebdomadaire',
+  ord:'Ordonnancement', equips:'Parc Équipements', rh:'Personnel / RH',
+  dm:'Instructions DM', hist:'Historique', rapport:'Rapport Hebdomadaire',
+  guide:'Guide d\'Utilisation', admin:'Gestion Base de Données', suivi:'Suivi des Tâches'
+};
 
 function showPage(pg) {
   document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
@@ -8093,7 +8104,7 @@ var _dynPerms = null; // Cache local des permissions Firebase
 
 function _loadDynPermissions() {
   if (!_fbDB) return;
-  _fbDB.ref('app_settings/permissions').on('value', function(snap) {
+  _fbDB.ref('atcdata/permissions').on('value', function(snap) {
     var p = snap.val();
     if (!p) {
       // Créer les permissions par défaut si absentes
@@ -8104,8 +8115,10 @@ function _loadDynPermissions() {
     console.log('Firebase: permissions chargées depuis app_settings/permissions');
     // Mettre à jour les règles de priorité locales si Firebase en a
     if (p.priorityRules && typeof p.priorityRules === 'object') {
-      Object.keys(p.priorityRules).forEach(function(k){
-        APP.priorityRules[k] = p.priorityRules[k];
+      // Désanitizer les clés (__ → .) depuis Firebase
+      var restored = _desanitizeRulesFromFirebase(p.priorityRules);
+      Object.keys(restored).forEach(function(k){
+        APP.priorityRules[k] = restored[k];
       });
     }
     // Rafraîchir l'UI pour activer/désactiver les boutons selon les droits
@@ -8119,17 +8132,32 @@ function _initDynPermissions() {
   if (!_fbDB || ROLE !== 'dm') return;
   // Publier les permissions par défaut dans Firebase
   var defaults = { priorityRules: APP.priorityRules, updatedBy:'dm', updatedAt: Date.now() };
-  _fbDB.ref('app_settings/permissions').set(defaults).then(function(){
+  _fbDB.ref('atcdata/permissions').set(defaults).then(function(){
     console.log('Firebase: permissions par défaut publiées dans app_settings/permissions');
   }).catch(function(e){ console.warn('permissions init:', e.message); });
+}
+
+function _sanitizeRulesForFirebase(rules) {
+  // Firebase n'accepte pas les '.' dans les clés → remplacer par '__'
+  var clean = {};
+  Object.keys(rules).forEach(function(k){ clean[k.replace(/\./g,'__')] = rules[k]; });
+  return clean;
+}
+function _desanitizeRulesFromFirebase(rules) {
+  // Restaurer les '.' depuis '__'
+  var clean = {};
+  Object.keys(rules).forEach(function(k){ clean[k.replace(/__/g,'.')] = rules[k]; });
+  return clean;
 }
 
 function _saveDynPermissions() {
   // DM sauvegarde les règles modifiées → push immédiat Firebase → Chef voit les changements
   if (!_fbDB || ROLE !== 'dm') return;
   if (!APP.priorityRules) return;
-  var payload = { priorityRules: APP.priorityRules, updatedBy:'dm', updatedAt: Date.now() };
-  _fbDB.ref('app_settings/permissions').update(payload).then(function(){
+  // Sanitizer les clés (. → __) pour Firebase RTDB
+  var safeRules = _sanitizeRulesForFirebase(APP.priorityRules);
+  var payload = { priorityRules: safeRules, updatedBy:'dm', updatedAt: Date.now() };
+  _fbDB.ref('atcdata/permissions').update(payload).then(function(){
     console.log('Firebase: permissions mises à jour et poussées vers tous les profils');
     toast('\u2705 Règles de priorité sauvegardées et partagées avec le Chef d\'Atelier.');
   }).catch(function(e){
