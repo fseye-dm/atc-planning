@@ -1075,7 +1075,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v17.8';
+var APP_VERSION = 'v17.9';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1658,13 +1658,13 @@ function _syncMerge(remote) {
     });
 
     APP.planning.daily = lp;
-    // Propager weekKey ET top10ids depuis le DM vers le Chef (DM prioritaire)
+    // ── Propagation top10ids : DM prioritaire + dernier timestamp si même profil ──
     if (remote.planning.weekKey) {
       var remWkTs  = (remote._fieldTs && remote._fieldTs['plan.generateTop10']) || 0;
       var locWkTs  = (APP.fieldTs     && APP.fieldTs['plan.generateTop10'])     || 0;
-      // DM prioritaire sur le Top10 — si le remote est plus récent, on applique
-      // Dernière génération gagne (DM ou Chef) — comparer timestamps
-    if (remWkTs > locWkTs) {
+      // DM toujours prioritaire; entre 2 chefs → dernier timestamp gagne
+      var remoteWins = (remote._by === 'dm') || (remWkTs > locWkTs);
+    if (remoteWins) {
         if (APP.planning.weekKey !== remote.planning.weekKey) {
           APP.planning.weekKey  = remote.planning.weekKey;
           changed = true;
@@ -3569,7 +3569,7 @@ if (!APP.priorityRules) {
     'ord.pieces':            'chef',
     // ── Planning Hebdo ──────────────────────────────────────────
     'plan.included':         'dm',    // DM construit le Top10
-    'plan.generateTop10':    'both',  // Génération partagée — dernier timestamp gagne
+    'plan.generateTop10':    'dm',    // Top 10 généré par DM uniquement
     'plan.frozen':           'dm',    // Seul le DM peut figer
     'plan.agent':            'chef',  // Chef affecte les agents
     'plan.realisation':      'chef',  // Chef saisit l'avancement réel
@@ -5517,8 +5517,10 @@ function renderPlanDay(day) {
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
     '<div class="ts tg">' + planned.length + '/10 équipement(s) &mdash; <span style="font-size:10px;color:var(--g400);">Max 10 recommandé</span></div>' +
-    '<button class="btn bp sm" onclick="autoGeneratePlanning()" style="font-size:10px;" ' +
-    'title="Génère le Top 10 — DM et Chef peuvent générer. Dernière génération partagée sur les 2 profils.">⚡ Générer Top 10</button>' +
+    (ROLE === 'dm'
+    ? '<button class="btn bp sm" onclick="autoGeneratePlanning()" style="font-size:10px;" ' +
+      'title="G\u00e9n\u00e8re le Top 10 de la semaine">\u26a1 G\u00e9n\u00e9rer Top 10</button>'
+    : '<span style="font-size:10px;color:var(--g400);font-style:italic;">Top 10 g\u00e9n\u00e9r\u00e9 par le Dir. Mat\u00e9riel</span>') +
   '</div>';
   if (!planned.length) h += '<div class="al ai">Aucun équipement. Cliquez "Générer depuis MP" ou ajoutez manuellement ci-dessous.</div>';
   planned.forEach(function(e) {
@@ -5626,9 +5628,14 @@ function saveRealisationPlan(day, eid, val) {
 }
 
 function autoGeneratePlanning() {
-  // Les 2 profils peuvent générer le Top 10 (priorité partagée — dernier timestamp gagne)
-  // Le résultat est synchronisé via Firebase vers l'autre profil
-  _stampField('plan.generateTop10');  // timestamp de génération
+  // ── GUARD : seul le Directeur Matériel génère le Top 10 ──────
+  // Le Chef d'Atelier reçoit le Top 10 via Firebase (_syncMerge)
+  // mais ne peut pas le recalculer lui-même (règle métier)
+  if (ROLE !== 'dm') {
+    toast('\u26d4 Seul le Directeur Mat\u00e9riel peut g\u00e9n\u00e9rer le Top 10.');
+    return;
+  }
+  _stampField('plan.generateTop10');  // timestamp pour propagation Firebase
   /*
    * ────────────────────────────────────────────────────────────────
    * ALGORITHME "TOP 10" — LOGIQUE DE PONDÉRATION (v14)
@@ -5678,9 +5685,6 @@ function autoGeneratePlanning() {
     var mpKey = e.id + '_' + curMonth;
     var mpVal = APP.masterplan[mpKey] || '';
     var mpScore = (mpVal === 'plan') ? 100 : 0;
-
-    // ── FILTRE STANDBY : exclure immédiatement les équipements en attente pièces
-    if (e.standby) { candidates.push({e:e, score:-9999, inProgress:false, frozen:false}); return; }
 
     // ── Critère 2 : Pièces disponibles
     // Disponible=+60 | Partiel=+35 | Non disponible=-50 (pénalité forte)
@@ -5803,17 +5807,35 @@ function autoGeneratePlanning() {
 }
 
 function autoGeneratePlanningIfEmpty() {
-  // Vérifier si le planning de la semaine courante a des données
+  // ── Vérification par semaine ISO (weekKey = S16-2026) ────────
+  // Ne génère AUTOMATIQUEMENT que si le planning n'existe pas encore
+  // pour la semaine courante — évite les regénérations parasites
+  var wi = getWeekInfo();
+  var currentWeekKey = 'S' + wi.num + '-' + new Date().getFullYear();
+
+  // Si le planning existe déjà pour cette semaine → ne rien faire
+  if (APP.planning.weekKey === currentWeekKey && APP.planning.top10ids && APP.planning.top10ids.length > 0) {
+    return; // Planning de la semaine courante déjà généré
+  }
+
+  // Vérifier aussi si des données existent dans les jours
   var hasAny = ['lundi','mardi','mercredi','jeudi','vendredi'].some(function(d) {
     var day = APP.planning.daily[d] || {};
     return Object.keys(day).some(function(k) { return day[k] && day[k].included; });
   });
-  // Ne générer AUTOMATIQUEMENT que si aucune donnée n'existe
-  // (jamais écraser les saisies existantes du Chef ou du DM)
-  if (!hasAny) {
+
+  // Nouvelle semaine détectée → nettoyer les données de l'ancienne semaine
+  if (!hasAny && APP.planning.weekKey !== currentWeekKey && ROLE === 'dm') {
+    // Archiver l'ancienne semaine si besoin puis regénérer
+    console.log('Nouvelle semaine détectée: ' + currentWeekKey + ' (ancien: ' + APP.planning.weekKey + ')');
+    // Réinitialiser le planning pour la nouvelle semaine
+    APP.planning.daily = {lundi:{},mardi:{},mercredi:{},jeudi:{},vendredi:{},samedi:{},dimanche:{}};
+    APP.planning.top10ids = [];
     autoGeneratePlanning();
+  } else if (!hasAny && APP.planning.weekKey !== currentWeekKey && ROLE !== 'dm') {
+    // Chef: attendre la synchronisation du DM
+    console.log('Nouvelle semaine: en attente du Top 10 du DM...');
   }
-  // Si hasAny → ne rien faire, les données existantes sont préservées
 }
 
 function tog(id) { var el = document.getElementById(id); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
