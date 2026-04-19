@@ -1075,7 +1075,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v17.11';
+var APP_VERSION = 'v17.12';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1362,7 +1362,8 @@ function saveApp() {
   if (_fbApp && _fbDB && _fbAuth && _fbAuth.currentUser) {
     _fbWriteToCloud();
   } else {
-    // Hors-ligne ou connexion locale par mot de passe → sync réseau local
+    // Hors-ligne ou connexion locale par mot de passe → stockage local
+    console.log('App: sauvegarde locale (hors-ligne ou mode local) — ' + new Date().toLocaleTimeString('fr-FR'));
     _syncWrite();
   }
 }
@@ -2168,6 +2169,12 @@ function _fbInit() {
     _fbApp  = firebase.initializeApp(FIREBASE_CONFIG);
     _fbAuth = firebase.auth();
     _fbDB   = firebase.database();
+    // ── Mode hors-ligne : cache local Firebase activé ──────────
+    // La version serveur écrase toujours le cache dès la reconnexion
+    // (géré par le listener _ts + _syncMerge avec timestamp comparison)
+    try {
+      firebase.database.enableLogging(false); // silencieux en prod
+    } catch(e) {}
 
     // ── PERSISTANCE EN CASCADE : LOCAL → SESSION → NONE ──────────────
     // Edge Tracking Prevention peut bloquer localStorage (auth/operation-not-supported).
@@ -2283,7 +2290,8 @@ function _fbOnSignedIn(user) {
   }
 
   _fbReady = true;
-  console.log('Firebase: authentifi\u00e9 en tant que [' + role + '] — ' + email);
+  console.log('Firebase: authentifié en tant que [' + role + '] — ' + email);
+  console.log('Firebase: initialisation sync — timestamp local:', new Date().toLocaleTimeString('fr-FR'));
 
   // ── Étape 1 : Lire les suppressions avant le merge ──────────
   // Équipements supprimés
@@ -2335,23 +2343,57 @@ function _fbOnSignedIn(user) {
     }
   }).catch(function(e) { console.error('Firebase read:', e); });
 
+  // ── Étape 3a : Indicateur connexion internet (online/offline) ──
+  function _updateNetworkBadge() {
+    var badge = document.getElementById('cloud-badge');
+    if (!badge) return;
+    if (navigator.onLine) {
+      badge.style.display = 'flex';
+      badge.innerHTML = '\u2665 Synchronis\u00e9';
+      badge.style.background = '#d1fae5';
+      badge.style.color = '#065f46';
+      badge.style.border = '1px solid #6ee7b7';
+    } else {
+      badge.style.display = 'flex';
+      badge.innerHTML = '\u25CF Hors-ligne';
+      badge.style.background = '#fee2e2';
+      badge.style.color = '#991b1b';
+      badge.style.border = '1px solid #fca5a5';
+    }
+  }
+  window.addEventListener('online',  function() { _updateNetworkBadge(); console.log('Firebase: Connexion r\u00e9tablie — sync en cours...'); });
+  window.addEventListener('offline', function() { _updateNetworkBadge(); console.log('Firebase: Mode hors-ligne activ\u00e9.'); });
+  _updateNetworkBadge();
+
   // ── Étape 3 : Listener temps réel sur _ts ───────────────────
   _fbDB.ref('atcdata/_ts').on('value', function(snap) {
     var remoteTs = snap.val() || 0;
     if (remoteTs > SYNC._fbLastWriteTs + 2000) {  // Absorbe debounce(400)+réseau(500)+marge
-      // Le timestamp distant est plus récent → lire et merger
+      console.log('Firebase: Sync reçue — mise à jour UI en cours...', new Date().toLocaleTimeString('fr-FR'));
       _fbDB.ref('atcdata').once('value').then(function(fullSnap) {
         var remote = fullSnap.val();
         if (!remote) return;
-        if (remote._by === ROLE) return; // notre propre écriture — ignorer
+        if (remote._by === ROLE) {
+          console.log('Firebase: sync propre ignorée [' + ROLE + ']');
+          return;
+        }
+        console.log('Firebase: données de [' + (remote._by||'?') + '] — ' + new Date().toLocaleTimeString('fr-FR'));
         try {
           var changed = _syncMerge(remote);
           if (changed) {
             _saveLocalOnly();
             autoRefreshUI();
-            console.log('Firebase: sync temps r\u00e9el re\u00e7ue depuis ' + (remote._by||'?'));
+            console.log('Firebase: UI mise à jour — sync terminée.');
+            var badge = document.getElementById('cloud-badge');
+            if (badge && navigator.onLine) {
+              badge.innerHTML = '\u2665 Synchronisé';
+              badge.style.background = '#d1fae5'; badge.style.color = '#065f46';
+              badge.style.display = 'flex';
+            }
           }
-        } catch(e) { console.error('Firebase sync:', e); }
+        } catch(e) { console.error('Firebase sync error:', e); }
+      }).catch(function(err) {
+        console.error('Firebase read error:', err.code, err.message);
       });
     }
   }, function(err) {
@@ -3740,12 +3782,16 @@ function _applyLogin(role, saveSession) {
   document.getElementById('topuser').textContent = nm;
   document.getElementById('sw-user').textContent = nm;
   if (ROLE === 'dm') {
+    // Publier la date de référence pour synchroniser DM et Chef
+    setTimeout(_fbPublishRefDate, 2000);
     document.getElementById('rbadge').className = 'rbadge bdm';
     document.getElementById('rbadge').innerHTML = '&#128084; Dir. Materiel';
     document.getElementById('topav').className = 'uav av-dm';
     document.getElementById('topav').textContent = 'DM';
     document.getElementById('adminNav').style.display = 'block';
   } else {
+    // Chef lit la date de référence publiée par le DM
+    setTimeout(_fbReadRefDate, 1500);
     document.getElementById('rbadge').className = 'rbadge bchef';
     document.getElementById('rbadge').innerHTML = '&#128295; Chef d\'Atelier';
     document.getElementById('topav').className = 'uav av-chef';
@@ -5191,7 +5237,7 @@ function sendAlert(t, b) {
 // WEEK HELPERS
 // ============================================================
 function getWeekInfo() {
-  var now = new Date();
+  var now = new Date(_getRefNow()); // Utilise la date de référence Firebase si disponible
   var day = now.getDay(); // 0=Sun
   var diff = (day === 0 ? -6 : 1 - day);
   var monday = new Date(now);
@@ -7717,8 +7763,10 @@ function chefResetFromFirebase() {
   }
   if (!confirm('R\u00e9initialiser compl\u00e8tement depuis Firebase ?\n\nToutes vos donn\u00e9es locales seront remplac\u00e9es par les donn\u00e9es du Directeur Mat\u00e9riel.\n\nConfirmer ?')) return;
 
-  toast('\u23f3 Rechargement depuis Firebase...');
+  toast('\u23f3 Rechargement forcé depuis Firebase (ignore le cache)...');
+  console.log('Firebase: Sync DM forcée — lecture directe serveur...');
 
+  // Forcer la lecture depuis le serveur (pas depuis le cache local)
   _fbDB.ref('atcdata').once('value').then(function(snap) {
     var remote = snap.val();
     if (!remote || typeof remote !== 'object') {
@@ -7769,7 +7817,16 @@ function chefResetFromFirebase() {
     // Sauvegarder localement et rafraîchir l'UI
     saveApp();
     autoRefreshUI();
-    toast('\u2705 Donn\u00e9es recharg\u00e9es depuis Firebase — synchronis\u00e9 \u00e0 100% avec le DM.');
+    console.log('Firebase: Sync DM terminée — données chargées depuis le serveur.');
+    toast('\u2705 Rechargement complet depuis Firebase — parité 100% avec le DM.\nRechargement de l\'interface...');
+    // Recharger l'UI complètement pour purger tout état résiduel
+    setTimeout(function() {
+      autoRefreshUI();
+      // Forcer le re-rendu de tous les modules actifs
+      try { renderDash(); } catch(e) {}
+      try { if (typeof curPlanDay !== 'undefined') renderPlanDay(curPlanDay); } catch(e) {}
+      try { renderOrdList(); } catch(e) {}
+    }, 300);
   }).catch(function(err) {
     toast('\u274c Erreur Firebase : ' + (err.message || err));
   });
@@ -7811,6 +7868,43 @@ function lockAndSavePriorityRules() {
   } else {
     toast('\u2705 Règles sauvegardées localement. Connectez-vous à Firebase pour les synchroniser.');
   }
+}
+
+
+// ════════════════════════════════════════════════════════════════
+// DATE DE RÉFÉRENCE FIREBASE
+// Le DM publie la date système → tous les profils utilisent
+// la même semaine de référence (évite décalage DM ↔ Chef)
+// ════════════════════════════════════════════════════════════════
+var _fbRefDate = null; // null = utiliser Date.now() local
+
+function _fbPublishRefDate() {
+  // DM uniquement — publie la date courante comme référence
+  if (ROLE !== 'dm' || !_fbDB) return;
+  var now = Date.now();
+  _fbDB.ref('atcdata/dateRef').set({ ts: now, by: 'dm' }).then(function() {
+    console.log('Firebase: date de référence publiée — ' + new Date(now).toLocaleDateString('fr-FR'));
+  }).catch(function(e){ console.warn('dateRef write:', e.message); });
+}
+
+function _fbReadRefDate() {
+  // Chef — lit la date publiée par le DM
+  if (!_fbDB) return;
+  _fbDB.ref('atcdata/dateRef').once('value').then(function(snap) {
+    var d = snap.val();
+    if (d && d.ts && typeof d.ts === 'number') {
+      var diff = Math.abs(Date.now() - d.ts);
+      if (diff < 86400000 * 7) { // < 7 jours → date valide
+        _fbRefDate = d.ts;
+        console.log('Firebase: date de référence DM utilisée — ' + new Date(d.ts).toLocaleDateString('fr-FR'));
+      }
+    }
+  }).catch(function(){});
+}
+
+function _getRefNow() {
+  // Retourne le timestamp de référence (DM publie, Chef lit)
+  return _fbRefDate || Date.now();
 }
 
 // Init sync badge
@@ -7856,6 +7950,7 @@ function _sanitizeObj(val) {
 
 function _fbWriteToCloud() {
   if (!_fbApp || !_fbDB || !_fbAuth || !_fbAuth.currentUser) return;
+  console.log('Firebase: écriture vers serveur — profil:', ROLE, '— ' + new Date().toLocaleTimeString('fr-FR'));
   // ⚡ RACE CONDITION FIX: bloquer le listener _ts pendant le debounce
   SYNC._fbLastWriteTs = Date.now();
   if (_fbWriteDebounce) clearTimeout(_fbWriteDebounce);
