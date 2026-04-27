@@ -1091,7 +1091,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v18.4';
+var APP_VERSION = 'v18.5';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1843,6 +1843,19 @@ function _syncMerge(remote) {
         if (!APP.fieldTs) APP.fieldTs = {};
         APP.fieldTs['priorityRules'] = remote._fieldTs['priorityRules'];
       }
+    }
+  }
+
+  // ── État verrouillage règles — Firebase = source de vérité ─────────────
+  if (remote.priorityRulesLocked !== undefined && remByDM) {
+    var wasLocked = !!APP.priorityRulesLocked;
+    APP.priorityRulesLocked   = !!remote.priorityRulesLocked;
+    APP.priorityRulesLockedAt = remote.priorityRulesLockedAt || null;
+    // Persister localement pour fallback hors-ligne
+    try { localStorage.setItem('pr_locked', JSON.stringify({ locked: APP.priorityRulesLocked, at: APP.priorityRulesLockedAt })); } catch(e2) {}
+    if (wasLocked !== APP.priorityRulesLocked) {
+      changed = true;
+      setTimeout(function(){ try { _refreshAdminLockUI(); } catch(e2){} }, 150);
     }
   }
 
@@ -3728,8 +3741,19 @@ var PRIORITY_FIELDS = [
   ['suivi.rh',            'Affectation RH sur une tâche',          'Suivi des Tâches', 'chef_only'],
   ['suivi.addTask',       'Création d\'une tâche',                 'Suivi des Tâches', 'chef_only'],
   ['suivi.deleteTask',    'Suppression d\'une tâche',              'Suivi des Tâches', 'chef_only'],
+  ['suivi.taskDesc',      'Description de la tâche...',            'Suivi des Tâches', 'chef_only'],
+  ['suivi.taskNom',       'Nom / Titre de la tâche',               'Suivi des Tâches', 'chef_only'],
   // ── Ordonnancement ────────────────────────────────────────
   ['ord.criteriaOrder',   'Ordre des critères de tri',             'Ordonnancement',   'dm_only'],
+  // ── Actions manquantes — Revue exhaustive ─────────────────
+  ['equip.standby',       'Mode Standby (attente ressources)',     'Ordonnancement',   'dm_only'],
+  ['equip.anomalies',     'Anomalies / Observations terrain',      'Équipements',      'both'],
+  ['plan.remark',         'Remarques opérateur sur équipement',   'Planning Hebdo',   'chef_only'],
+  ['hist.addEntry',       'Ajout entrée historique',               'Historique',       'dm_only'],
+  ['famille.edit',        'Gestion des familles équipements',      'Gestion Base',     'dm_only'],
+  ['taches.typeEdit',     'Gestion types de tâches (atelier)',     'Gestion Base',     'dm_only'],
+  ['pw.change',           'Modification des mots de passe',        'Gestion Base',     'dm_only'],
+  ['backup.config',       'Configuration sauvegarde automatique',  'Gestion Base',     'dm_only'],
 ];
 
 // ── Règles de priorité configurables (Admin → Règles de Priorité) ──
@@ -3784,10 +3808,19 @@ if (!APP.priorityRules) {
     'suivi.rh':              'chef',  // Affectation RH → Chef
     'suivi.addTask':         'chef',  // Création tâche → Chef
     'suivi.deleteTask':      'chef',  // Suppression tâche → Chef
+    'suivi.taskDesc':        'chef',  // Description de la tâche → Chef (priorité Chef)
+    'suivi.taskNom':         'chef',  // Nom/titre de la tâche → Chef
     'suivi.anomalies':       'chef',
     // ── HISTORIQUE & FAMILLE ────────────────────────
     'hist.addEntry':         'dm',
-    'famille.edit':          'dm'
+    'famille.edit':          'dm',
+    // ── Nouvelles règles (revue exhaustive) ─────────────────
+    'equip.standby':         'dm',    // Standby → DM exclusif
+    'equip.anomalies':       'chef',  // Anomalies terrain → Chef
+    'plan.remark':           'chef',  // Remarques opérateur → Chef
+    'taches.typeEdit':       'dm',    // Types de tâches → DM
+    'pw.change':             'dm',    // Mots de passe → DM
+    'backup.config':         'dm',    // Sauvegarde → DM
   };
 }
 
@@ -3948,6 +3981,16 @@ function _applyLogin(role, saveSession) {
     }, 10 * 60 * 1000); // 10 minutes
     console.log('Chef: auto-sync activée (toutes les 10 minutes)');
   }
+
+  // ── Restaurer état verrouillage depuis localStorage (fallback hors-ligne) ──
+  try {
+    var storedLock = JSON.parse(localStorage.getItem('pr_locked') || 'null');
+    if (storedLock && storedLock.locked && !APP.priorityRulesLocked) {
+      APP.priorityRulesLocked   = true;
+      APP.priorityRulesLockedAt = storedLock.at;
+      APP.priorityRulesLockedBy = 'dm';
+    }
+  } catch(e) {}
   initFilters();
   updateWeekBadge();
   _injectSignatures();
@@ -4411,7 +4454,7 @@ function resetPriorityRules() {
     'mp.cell':'dm','masterplanLocked':'dm',
     'dm.text':'dm','dm.priority':'dm','dm.dest':'dm','dm.executed':'dm','dm.comment':'chef','dm.deleteInstruction':'dm','dm.create':'dm',
     'agent.actif':'chef','agent.heures':'chef','agent.supp':'dm','agent.metier':'dm','agent.deleted':'dm','agent.create':'dm',
-    'suivi.done':'chef','suivi.rh':'chef','suivi.addTask':'chef','suivi.deleteTask':'chef','suivi.anomalies':'chef',
+    'suivi.done':'chef','suivi.rh':'chef','suivi.addTask':'chef','suivi.deleteTask':'chef','suivi.taskDesc':'chef','suivi.taskNom':'chef','suivi.anomalies':'chef',
     'hist.addEntry':'dm','famille.edit':'dm'
   }
   _stampField('priorityRules');
@@ -4458,13 +4501,17 @@ function buildPriorityRulesPanel() {
         : editBy === 'chef_only'
         ? '<span style="font-size:9px;color:#059669;background:#f0fdf4;padding:1px 5px;border-radius:8px;margin-left:5px;" title="Par défaut : Chef uniquement">défaut Chef</span>'
         : '';
-      var dmInput = '<label style="cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">' +
-          '<input type="radio" name="pr_' + fid + '" value="dm" ' + (dmCk ? 'checked' : '') +
-          ' onchange="savePriorityRule(\'' + fid + '\',\'dm\')" style="cursor:pointer;accent-color:#1d4ed8;width:14px;height:14px;">' +
+      var isLocked = !!APP.priorityRulesLocked;
+      var disabledAttr = isLocked ? 'disabled' : '';
+      var cursorStyle  = isLocked ? 'not-allowed' : 'pointer';
+      var opacityStyle = isLocked ? '0.45' : '1';
+      var dmInput = '<label style="cursor:' + cursorStyle + ';display:flex;align-items:center;justify-content:center;gap:4px;opacity:' + opacityStyle + ';">' +
+          '<input type="radio" name="pr_' + fid + '" value="dm" ' + (dmCk ? 'checked' : '') + ' ' + disabledAttr +
+          ' onchange="savePriorityRule(\'' + fid + '\',\'dm\')" style="cursor:' + cursorStyle + ';accent-color:#1d4ed8;width:14px;height:14px;">' +
         '</label>';
-      var chInput = '<label style="cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">' +
-          '<input type="radio" name="pr_' + fid + '" value="chef" ' + (chCk ? 'checked' : '') +
-          ' onchange="savePriorityRule(\'' + fid + '\',\'chef\')" style="cursor:pointer;accent-color:#059669;width:14px;height:14px;">' +
+      var chInput = '<label style="cursor:' + cursorStyle + ';display:flex;align-items:center;justify-content:center;gap:4px;opacity:' + opacityStyle + ';">' +
+          '<input type="radio" name="pr_' + fid + '" value="chef" ' + (chCk ? 'checked' : '') + ' ' + disabledAttr +
+          ' onchange="savePriorityRule(\'' + fid + '\',\'chef\')" style="cursor:' + cursorStyle + ';accent-color:#059669;width:14px;height:14px;">' +
         '</label>';
       var note = defaultNote;
       return '<tr style="border-bottom:1px solid var(--g100);' + (winner === 'chef' ? 'background:#f0fdf420;' : 'background:#eff6ff20;') + '">' +
@@ -4483,6 +4530,7 @@ function buildPriorityRulesPanel() {
       'Sans conflit, <strong>toutes les saisies des deux profils coexistent</strong> et sont actives.<br>' +
       '<strong>Cochez</strong> le profil prioritaire en cas de conflit sur chaque champ. Une alerte ⚡ s\'affiche à l\'autre profil quand son champ a été remplacé.' +
     '</div>' +
+    (APP.priorityRulesLocked ? '<div id="pr-lock-banner" style="background:#fef9c3;border:1px solid #f59e0b;border-radius:6px;padding:8px 12px;font-size:11px;color:#78350f;margin-bottom:10px;"> &#128274; <strong>R&egrave;gles verrouill&eacute;es.</strong> Seul le DM peut d&eacute;verrouiller pour modifier.</div>' : '<div id="pr-lock-banner" style="display:none;"></div>') +
     '<div style="overflow-x:auto;">' +
       '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
         '<thead>' +
@@ -4497,7 +4545,9 @@ function buildPriorityRulesPanel() {
     '</div>' +
     '<div style="margin-top:12px;padding:10px 12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;">' +
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
-        '<button onclick="lockAndSavePriorityRules()" style="background:#059669;color:#fff;border:none;padding:7px 16px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">&#128274; Valider et verrouiller les règles</button>' +
+        (APP.priorityRulesLocked
+        ? '<button id="btn-lock-rules" onclick="lockAndSavePriorityRules()" style="background:#dc2626;color:#fff;border:none;padding:7px 16px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">&#128274; D&eacute;verrouiller les r&egrave;gles</button>'
+        : '<button id="btn-lock-rules" onclick="lockAndSavePriorityRules()" style="background:#059669;color:#fff;border:none;padding:7px 16px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">&#128275; Valider et verrouiller les r&egrave;gles</button>') +
         '<button class="btn bd sm" onclick="resetPriorityRules()" style="font-size:11px;">&#8635; Réinitialiser par défaut</button>' +
         '<span style="font-size:10px;color:var(--g400);">Bleu = Dir. Matériel · Vert = Chef d\'Atelier · défaut = valeur par défaut</span>' +
       '</div>' +
@@ -5564,14 +5614,97 @@ function renderDash() {
   });
 
   var h8 = APP.hist.slice().reverse().slice(0,8);
-  new Chart(document.getElementById('chartR'), {
-    type: 'line',
-    data: {
-      labels: h8.map(function(h) { return h.date.substring(5); }),
-      datasets: [{ label: '% Realisation', data: h8.map(function(h) { return h.realisation; }), borderColor: '#1d4ed8', backgroundColor: 'rgba(29,78,216,.08)', fill: true, tension: 0.4, pointBackgroundColor: '#1d4ed8' }]
-    },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, ticks: { callback: function(v) { return v + '%'; } } } } }
+  // ── Format date JJ-MM-AA ─────────────────────────────────
+  function fmtDateChart(d) {
+    if (!d) return '—';
+    var parts = String(d).split('-'); // YYYY-MM-DD
+    if (parts.length === 3) {
+      var yy = parts[0].slice(-2); // 2 derniers chiffres de l'année
+      return parts[2] + '-' + parts[1] + '-' + yy; // JJ-MM-AA
+    }
+    return d.substring(5); // fallback
+  }
+  var chartLabels  = h8.map(function(h) { return fmtDateChart(h.date); });
+  var chartData    = h8.map(function(h) { return h.realisation || 0; });
+  var chartBgColors = chartData.map(function(v) {
+    return v >= 75 ? 'rgba(16,185,129,.75)' : v >= 50 ? 'rgba(249,115,22,.75)' : 'rgba(239,68,68,.65)';
   });
+  var chartBrColors = chartData.map(function(v) {
+    return v >= 75 ? '#059669' : v >= 50 ? '#ea580c' : '#dc2626';
+  });
+  (function() {
+    var ctx = document.getElementById('chartR');
+    if (!ctx) return;
+    // Détruire le chart précédent si il existe
+    if (ctx._chartInstance) { try { ctx._chartInstance.destroy(); } catch(e) {} }
+    ctx._chartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: chartLabels,
+        datasets: [
+          {
+            type: 'bar',
+            label: 'Taux de réalisation',
+            data: chartData,
+            backgroundColor: chartBgColors,
+            borderColor: chartBrColors,
+            borderWidth: 2,
+            borderRadius: 4,
+            order: 2
+          },
+          {
+            type: 'line',
+            label: 'Tendance',
+            data: chartData,
+            borderColor: '#1d4ed8',
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            pointBackgroundColor: '#1d4ed8',
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            tension: 0.35,
+            fill: false,
+            order: 1
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: true, position: 'top', labels: { font: { size: 10 }, boxWidth: 12 } },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                var val = ctx.parsed.y;
+                var emoji = val >= 75 ? '✅' : val >= 50 ? '⚠️' : '🔴';
+                return ' ' + emoji + ' ' + ctx.dataset.label + ' : ' + val + '%';
+              },
+              title: function(ctx) {
+                return '📅 Semaine du ' + (ctx[0] ? ctx[0].label : '');
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { font: { size: 9 }, maxRotation: 35 },
+            grid: { display: false }
+          },
+          y: {
+            min: 0, max: 100,
+            ticks: {
+              font: { size: 9 },
+              callback: function(v) { return v + '%'; },
+              stepSize: 25
+            },
+            grid: { color: 'rgba(0,0,0,.06)' }
+          }
+        }
+      }
+    });
+  })();
 }
 
 // ============================================================
@@ -8040,39 +8173,87 @@ function chefResetFromFirebase() {
 // Valider et verrouiller les règles de priorité
 // ════════════════════════════════════════════════════════════════
 function lockAndSavePriorityRules() {
+  if (ROLE !== 'dm') { toast('\u26d4 Seul le Directeur Matériel peut verrouiller les règles.'); return; }
   if (!APP.priorityRules) return;
-  // Marquer comme validées avec timestamp
-  APP.priorityRulesLockedAt = Date.now();
-  APP.priorityRulesLockedBy = ROLE;
+
+  // ── Toggle verrou ──────────────────────────────────────────────────────
+  APP.priorityRulesLocked   = !APP.priorityRulesLocked;
+  APP.priorityRulesLockedAt = APP.priorityRulesLocked ? Date.now() : null;
+  APP.priorityRulesLockedBy = APP.priorityRulesLocked ? 'dm' : null;
   _stampField('priorityRules');
-  saveApp();
-  // ── Push immédiat vers app_settings/permissions (temps réel Chef) ──
-  _saveDynPermissions();
-  // Pousser IMMÉDIATEMENT vers Firebase (push sans debounce)
+
+  // ── Persistance Firebase (source de vérité) ────────────────────────────
+  var fbPayload = {
+    '_by': 'dm', '_ts': Date.now(),
+    'priorityRules':       _sanitizeObj(APP.priorityRules || {}),
+    'priorityRulesLocked': APP.priorityRulesLocked,
+    '_fieldTs':            _sanitizeObj(APP.fieldTs || {})
+  };
   if (_fbApp && _fbDB && _fbAuth && _fbAuth.currentUser) {
-    var raw = JSON.parse(_syncPayload());
-    var payload = JSON.parse(JSON.stringify(raw, function(k,v){
-      if(v&&typeof v==='object'&&!Array.isArray(v)){var r={};for(var key in v){r[sanitizeKey(key)]=v[key];}return r;}
-      return v;
-    }));
-    SYNC._fbLastWriteTs = payload._ts||0;
-    _fbDB.ref('atcdata').update({
-        '_by': ROLE, '_ts': Date.now(),
-        'priorityRules': _sanitizeObj(APP.priorityRules || {}),
-        '_fieldTs': _sanitizeObj(APP.fieldTs || {})
-      }).then(function(){
-      toast('\u2705 Règles de priorité verrouillées et synchronisées avec Firebase. Les 2 profils appliquent maintenant les mêmes règles.');
-      var statusEl = document.getElementById('pr-save-status');
-      if (statusEl) {
-        statusEl.textContent = '\u2705 Règles validées et envoyées vers Firebase — ' + new Date().toLocaleTimeString('fr-FR');
-        statusEl.style.color = '#065f46';
-      }
-    }).catch(function(e){
-      toast('\u26d4 Erreur Firebase : ' + (e.message||e));
-    });
+    _fbDB.ref('atcdata').update(fbPayload).then(function() {
+      _pushDynPermissions();
+      _refreshAdminLockUI();
+      var msg = APP.priorityRulesLocked
+        ? '\u2705 Règles verrouillées et synchronisées — les deux profils appliquent ces règles.'
+        : '\uD83D\uDD13 Règles déverrouillées — modifications possibles.';
+      toast(msg);
+    }).catch(function(e){ toast('\u26d4 Erreur Firebase : ' + (e.message||e)); });
   } else {
-    toast('\u2705 Règles sauvegardées localement. Connectez-vous à Firebase pour les synchroniser.');
+    // Hors-ligne → localStorage + reload du panneau
+    try { localStorage.setItem('pr_locked', JSON.stringify({ locked: APP.priorityRulesLocked, at: APP.priorityRulesLockedAt })); } catch(e) {}
+    _refreshAdminLockUI();
+    saveApp();
+    toast(APP.priorityRulesLocked ? '\u2705 Règles verrouillées (local — sync Firebase dès reconnexion).' : '\uD83D\uDD13 Règles déverrouillées.');
   }
+}
+
+// ── Rafraîchir le bouton et les radios sans recharger toute la page ────────
+function _refreshAdminLockUI() {
+  var locked = !!APP.priorityRulesLocked;
+  // Bouton
+  var btnEl = document.getElementById('btn-lock-rules');
+  if (btnEl) {
+    btnEl.innerHTML = locked ? '\uD83D\uDD12 Déverrouiller les règles' : '\uD83D\uDD13 Valider et verrouiller les règles';
+    btnEl.style.background = locked ? '#dc2626' : '#059669';
+    btnEl.title = locked ? 'Cliquer pour permettre de nouvelles modifications' : 'Cliquer pour figer les règles';
+  }
+  // Statut
+  var stEl = document.getElementById('pr-save-status');
+  if (stEl) {
+    stEl.textContent = locked
+      ? '\u2705 Règles verrouillées le ' + new Date(APP.priorityRulesLockedAt||Date.now()).toLocaleString('fr-FR')
+      : '\u270F\uFE0F Règles en cours d\'édition — cliquez sur Verrouiller quand terminé.';
+    stEl.style.color = locked ? '#065f46' : '#92400e';
+  }
+  // Radios : disabled si verrouillé
+  document.querySelectorAll('[name^="pr_"]').forEach(function(radio) {
+    radio.disabled = locked;
+    radio.parentElement.style.opacity = locked ? '0.5' : '1';
+    radio.parentElement.style.cursor  = locked ? 'not-allowed' : 'pointer';
+  });
+  // Bannière d'état dans le panneau
+  var banEl = document.getElementById('pr-lock-banner');
+  if (banEl) {
+    if (locked) {
+      banEl.innerHTML = '\uD83D\uDD12 <strong>Règles verrouillées.</strong> Seul le DM peut déverrouiller pour apporter des modifications.';
+      banEl.style.cssText = 'background:#fef9c3;border:1px solid #f59e0b;border-radius:6px;padding:8px 12px;font-size:11px;color:#78350f;margin-bottom:10px;';
+      banEl.style.display = 'block';
+    } else {
+      banEl.style.display = 'none';
+    }
+  }
+}
+
+// ── Pusher les permissions dynamiques ─────────────────────────────────────
+function _pushDynPermissions() {
+  if (!_fbDB || ROLE !== 'dm') return;
+  var safeRules = _sanitizeRulesForFirebase(APP.priorityRules || {});
+  _fbDB.ref('atcdata/permissions').update({
+    priorityRules: safeRules,
+    priorityRulesLocked: !!APP.priorityRulesLocked,
+    updatedBy: 'dm',
+    updatedAt: Date.now()
+  }).catch(function(e){ console.warn('permissions push:', e.message); });
 }
 
 
