@@ -1735,7 +1735,11 @@ function _syncMerge(remote) {
       if (!lst[wk]) { lst[wk] = remote.suiviTaches[wk]; changed = true; }
       else {
         Object.keys(remote.suiviTaches[wk]).forEach(function(eid) {
-          if (!lst[wk][eid]) { lst[wk][eid] = remote.suiviTaches[wk][eid]; changed = true; }
+          var remEntry = remote.suiviTaches[wk][eid];
+          // Normaliser ancien format Firebase (array direct → { taches: [] })
+          if (Array.isArray(remEntry)) remEntry = { taches: remEntry };
+          if (!remEntry || typeof remEntry !== 'object') return;
+          if (!lst[wk][eid]) { lst[wk][eid] = remEntry; changed = true; }
           else {
             var rtaches = (remote.suiviTaches[wk][eid] || {}).taches || [];
             var ltaches = (lst[wk][eid] || {}).taches || [];
@@ -6377,15 +6381,29 @@ function getWeekSuiviKey() {
 
 function getSuiviEquipTaches(equipId) {
   var wk = getWeekSuiviKey();
+  if (!APP.suiviTaches) APP.suiviTaches = {};
   if (!APP.suiviTaches[wk]) APP.suiviTaches[wk] = {};
-  if (!APP.suiviTaches[wk][equipId]) APP.suiviTaches[wk][equipId] = { taches: [] };
-  return APP.suiviTaches[wk][equipId].taches;
+  var entry = APP.suiviTaches[wk][equipId];
+  // ── Normaliser l'ancien format Firebase (tableau direct) vers { taches: [] } ──
+  if (Array.isArray(entry)) {
+    // Ancien format: suiviTaches[wk][eid] = [t1, t2, ...] → migrer
+    APP.suiviTaches[wk][equipId] = { taches: entry };
+    entry = APP.suiviTaches[wk][equipId];
+  }
+  if (!entry) {
+    APP.suiviTaches[wk][equipId] = { taches: [] };
+    entry = APP.suiviTaches[wk][equipId];
+  }
+  if (!Array.isArray(entry.taches)) {
+    entry.taches = [];
+  }
+  return entry.taches;
 }
 
 function computeEquipPct(equipId) {
   var taches = getSuiviEquipTaches(equipId);
-  if (!taches.length) return 0;
-  var done = taches.filter(function(t){ return t.done; }).length;
+  if (!taches || !taches.length) return 0;  // guard: taches peut être null/undefined
+  var done = taches.filter(function(t){ return t && t.done; }).length;
   return Math.round(done / taches.length * 100);
 }
 
@@ -8334,10 +8352,13 @@ function _loadDynPermissions() {
 
 function _initDynPermissions() {
   if (!_fbDB || ROLE !== 'dm') return;
-  // Publier les permissions par défaut dans Firebase
-  var defaults = { priorityRules: APP.priorityRules, updatedBy:'dm', updatedAt: Date.now() };
-  _fbDB.ref('atcdata/permissions').set(defaults).then(function(){
-    console.log('Firebase: permissions par défaut publiées dans app_settings/permissions');
+  // Sanitizer les clés (. → __) avant envoi Firebase (les '.' sont interdits dans les clés RTDB)
+  var safeRules = _sanitizeRulesForFirebase(APP.priorityRules || {});
+  var payload = { priorityRules: safeRules, updatedBy:'dm', updatedAt: Date.now(),
+                  priorityRulesLocked: !!APP.priorityRulesLocked };
+  // Utiliser update() au lieu de set() pour ne pas écraser les autres nœuds
+  _fbDB.ref('atcdata/permissions').update(payload).then(function(){
+    console.log('Firebase: permissions par défaut publiées (clés sanitizées).');
   }).catch(function(e){ console.warn('permissions init:', e.message); });
 }
 
