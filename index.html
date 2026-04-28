@@ -708,7 +708,7 @@ textarea{resize:vertical;min-height:60px}
     <div class="ns">Donnees</div>
     <div class="ni" onclick="showPage('hist')"><span class="ic">&#128193;</span> Historique</div>
     <div class="ni" onclick="showPage('rapport')"><span class="ic">&#128196;</span> Rapport Hebdo</div>
-    <div class="ni" onclick="showPage('suivi')"><span class="ic">&#128203;</span> Suivi des Tâches</div>
+    <div class="ni" onclick="showPage('journal')"><span class="ic">&#128216;</span> Journal des Tâches</div>
     <div class="ni" onclick="showPage('guide')"><span class="ic">&#10067;</span> Guide d'Utilisation</div>
     <div id="adminNav" style="display:none">
       <div class="ns">Admin</div>
@@ -1091,7 +1091,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v18.5';
+var APP_VERSION = 'v19.0';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -2925,6 +2925,7 @@ function _renderPage(pg) {
       rptEl.value = APP.planning.rptComment;
     }
   }
+  else if (pg === 'Journal des Tâches') renderJournal();
 }
 
 function _syncRefreshView() {
@@ -3766,16 +3767,17 @@ var PRIORITY_FIELDS = [
 // 'dm'   = DM prioritaire en cas de conflit
 if (!APP.priorityRules) {
   APP.priorityRules = {
-    // ── ÉQUIPEMENTS ─────────────────────────────── (conforme capture)
-    'equip.statut':          'chef',  // Statut OK/PANNE/IMMOB → Chef terrain
-    'equip.pieces':          'chef',  // Disponibilité pièces → Chef terrain
-    'equip.desc':            'chef',  // Description/Travaux → Chef terrain
-    'equip.anomalies':       'chef',
-    'equip.create':          'chef',  // Créer équipement → Chef (capture=Chef)
-    'equip.delete':          'dm',    // Supprimer équipement → DM
-    'equip.deleted':         'dm',    // Soft-delete → DM
+    // ── V19: Chef = maître de l'opérationnel, DM = maître de la planification ──
+    // ÉQUIPEMENTS
+    'equip.statut':          'chef',  // Statut OK/PANNE/IMMOB → Chef (opérationnel)
+    'equip.pieces':          'chef',  // Disponibilité pièces → Chef (terrain)
+    'equip.desc':            'chef',  // Description panne → Chef (terrain)
+    'equip.anomalies':       'chef',  // Anomalies → Chef (terrain)
+    'equip.create':          'chef',  // Créer équipement → Chef
+    'equip.delete':          'dm',    // Supprimer équipement → DM exclusif
+    'equip.deleted':         'dm',    // Soft-delete → DM exclusif
     'equip.standby':         'dm',    // Standby → DM exclusif
-    'equip.priority':        'dm',    // Priorité ordonnancement → DM
+    'equip.priority':        'dm',    // Priorité ordonnancement → DM exclusif
     // ── ORDONNANCEMENT ──────────────────────────── (conforme capture)
     'ord.criteriaOrder':     'dm',    // Ordre critères tri → DM
     'ord.priority':          'dm',    // Priorité opérationnelle → DM
@@ -3942,6 +3944,13 @@ function _applyLogin(role, saveSession) {
     // DM: charger les permissions ET les pousser si absentes
     setTimeout(function(){ _loadDynPermissions(); setTimeout(_initDynPermissions, 2000); }, 500);
     // Masquer les badges non pertinents en mode Full Online DM
+    // DM dispose du bouton Sync pour forcer la synchro avec les données Chef
+    var syncBtnDM = document.getElementById('chef-reset-btn');
+    if (syncBtnDM) {
+      syncBtnDM.style.display = 'inline-flex';
+      syncBtnDM.innerHTML = '\u21BA Sync Chef';
+      syncBtnDM.title = 'Synchroniser manuellement avec les saisies du Chef d\'Atelier';
+    }
     ['sync-badge','db-badge','offline-badge'].forEach(function(id){
       var el=document.getElementById(id); if(el) el.style.display='none';
     });
@@ -3960,9 +3969,9 @@ function _applyLogin(role, saveSession) {
     document.getElementById('topav').className = 'uav av-chef';
     document.getElementById('topav').textContent = 'SC';
     document.getElementById('adminNav').style.display = 'none';
-    // Afficher le bouton "Sync DM" pour le Chef
+    // Chef: pas de bouton Sync (le DM synchronise)
     var rBtn = document.getElementById('chef-reset-btn');
-    if (rBtn) rBtn.style.display = 'inline-flex';
+    if (rBtn) rBtn.style.display = 'none';
 
     // ── Auto-sync Chef toutes les 10 minutes ──────────────────
     // Force une synchronisation complète depuis Firebase toutes les 10 min
@@ -4170,14 +4179,15 @@ var PTITLES = {
   dashboard:'Dashboard', masterplan:'Master Planning 6 Mois', planning:'Planning Hebdomadaire',
   ord:'Ordonnancement', equips:'Parc Équipements', rh:'Personnel / RH',
   dm:'Instructions DM', hist:'Historique', rapport:'Rapport Hebdomadaire',
-  guide:'Guide d\'Utilisation', admin:'Gestion Base de Données', suivi:'Suivi des Tâches'
+  guide:'Guide d\'Utilisation', admin:'Gestion Base de Données',
+  suivi:'Suivi des Tâches', journal:'Journal des Tâches'
 };
 
 function showPage(pg) {
   document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
   document.querySelectorAll('.ni').forEach(function(n) { n.classList.remove('active'); });
   // Dynamic pages — V7: always recreate to avoid blank page bug
-  if (pg === 'guide' || pg === 'admin' || pg === 'suivi') {
+  if (pg === 'guide' || pg === 'admin' || pg === 'suivi' || pg === 'journal') {
     var dynEl = document.getElementById('page-' + pg);
     if (!dynEl) {
       dynEl = document.createElement('div');
@@ -5930,62 +5940,161 @@ function renderPlanDay(day) {
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
     '<div class="ts tg">' + planned.length + '/10 équipement(s) &mdash; <span style="font-size:10px;color:var(--g400);">Max 10 recommandé</span></div>' +
     (ROLE === 'dm'
-    ? '<button class="btn bp sm" onclick="autoGeneratePlanning()" style="font-size:10px;" ' +
-      'title="G\u00e9n\u00e8re le Top 10 de la semaine">\u26a1 G\u00e9n\u00e9rer Top 10</button>'
-    : '<span style="font-size:10px;color:var(--g400);font-style:italic;">Top 10 g\u00e9n\u00e9r\u00e9 par le Dir. Mat\u00e9riel</span>') +
+    ? '<button class="btn bp sm" onclick="autoGeneratePlanning()" style="font-size:10px;" title="Générer le Top 10 de la semaine">⚡ Générer Top 10</button>'
+    : '<span style="font-size:10px;color:var(--g400);font-style:italic;">Top 10 généré par le Dir. Matériel</span>') +
   '</div>';
   if (!planned.length) h += '<div class="al ai">Aucun équipement. Cliquez "Générer depuis MP" ou ajoutez manuellement ci-dessous.</div>';
+
   planned.forEach(function(e) {
     var d = dayData[e.id] || {};
     var did = 'pd_' + day + '_' + e.id;
     var isFrozen = d.frozen;
-    // Realization color
-    var realPct = d.realisation ? parseInt(d.realisation) : 0;
-    var realColor = realPct >= 100 ? '#dcfce7' : realPct >= 75 ? '#d1fae5' : realPct >= 50 ? '#fed7aa' : realPct >= 25 ? '#fef9c3' : 'transparent';
-    var realBorder = realPct >= 100 ? '#22c55e' : realPct >= 75 ? '#10b981' : realPct >= 50 ? '#f97316' : realPct >= 25 ? '#eab308' : 'transparent';
-    var realLabel = realPct > 0 ? '<span style="background:' + realBorder + ';color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;">' + realPct + '%</span>' : '';
+    // % réalisation = max(planning day, suivi tâches)
+    var suiviPct = computeEquipPct(e.id);
+    var dayRealPct = d.realisation ? parseInt(d.realisation) : 0;
+    var realPct = Math.max(suiviPct, dayRealPct);
+    var realColor  = realPct>=100?'#dcfce7':realPct>=75?'#d1fae5':realPct>=50?'#fed7aa':realPct>=25?'#fef9c3':'transparent';
+    var realBorder = realPct>=100?'#22c55e':realPct>=75?'#10b981':realPct>=50?'#f97316':realPct>=25?'#eab308':'var(--b5)';
     var frozenIcon = isFrozen ? '🔒' : '📌';
-    var frozenTitle = isFrozen ? 'Figé: cliquez pour libérer' : 'Cliquez pour figer cet équipement';
+    // Barre de progression tâches
+    var taches = getSuiviEquipTaches(e.id);
+    var doneCnt = taches.filter(function(t){return t.done;}).length;
+    var totalCnt = taches.length;
+    var progBar = totalCnt > 0
+      ? '<div style="flex:1;height:5px;background:#e2e8f0;border-radius:3px;overflow:hidden;margin:0 4px;"><div style="height:5px;width:'+realPct+'%;background:'+realBorder+';border-radius:3px;transition:width .3s;"></div></div>'
+      : '';
+    var tachesBadge = '<span style="font-size:10px;color:'+(totalCnt?realBorder:'var(--g400)')+';font-weight:700;">'+(totalCnt?doneCnt+'/'+totalCnt+' ✓':totalCnt+' tâche')+' </span>';
 
-    h += '<div class="card mb2" style="border-left:3px solid ' + (isFrozen ? '#7c3aed' : realBorder || 'var(--b5)') + ';background:' + (realColor !== 'transparent' ? realColor : '#fff') + ';">' +
-      '<div style="display:grid;grid-template-columns:75px 140px 75px 80px 1fr 30px 85px 90px;align-items:center;gap:5px;padding:7px 11px;cursor:pointer;" onclick="tog(\'' + did + '\')">' +
-        '<strong class="ts">' + e.code + '</strong>' +
-        '<div class="trunc tx" style="max-width:130px;">' + e.type + ' ' + e.immat + '</div>' +
+    h += '<div class="card mb2" id="plancard_'+e.id+'" style="border-left:3px solid '+(isFrozen?'#7c3aed':realBorder)+';background:'+(realColor!=='transparent'?realColor:'#fff')+';">' +
+      // ── Ligne principale (header de la card) ─────────────────────────
+      '<div style="display:grid;grid-template-columns:70px 130px 68px 75px 1fr auto auto auto;align-items:center;gap:5px;padding:7px 10px;cursor:pointer;" onclick="togPlanCard(\'' + e.id + '\',\'' + day + '\')">' +
+        '<strong class="ts" style="font-size:13px;color:var(--b5);">' + e.code + '</strong>' +
+        '<div class="trunc tx" style="max-width:125px;font-size:11px;">' + e.type + ' ' + e.immat + '</div>' +
         '<div>' + renderStatusBadge(e, day) + '</div>' +
-        '<select onclick="event.stopPropagation()" onchange="spf(\'' + day + '\',\'' + e.id + '\',\'pieces\',this.value)" style="font-size:10px;padding:2px 3px;width:100%;">' +
-          '<option ' + (d.pieces==='Disponible'?'selected':'') + '>Disponible</option>' +
-          '<option ' + (d.pieces==='Non disponible'?'selected':'') + '>Non disponible</option>' +
-          '<option ' + (d.pieces==='Partiellement disponible'?'selected':'') + '>Partiellement disponible</option>' +
+        '<select onclick="event.stopPropagation()" onchange="spf(\'' + day + '\',\'' + e.id + '\',\'pieces\',this.value)" style="font-size:10px;padding:2px;width:100%;">' +
+          '<option '+(d.pieces==='Disponible'?'selected':'')+'>Disponible</option>' +
+          '<option '+(d.pieces==='Non disponible'?'selected':'')+'>Non disponible</option>' +
+          '<option '+(d.pieces==='Partiellement disponible'?'selected':'')+'>Partiellement disponible</option>' +
         '</select>' +
-        '<div class="trunc tx tg" style="max-width:160px;">' + e.desc.substring(0,50) + '...</div>' +
-        '<span onclick="event.stopPropagation();toggleFreeze(\'' + day + '\',\'' + e.id + '\')" title="' + frozenTitle + '" style="cursor:pointer;font-size:14px;">' + frozenIcon + '</span>' +
-        '<button onclick="event.stopPropagation();openCL(\'' + e.id + '\')" class="btn sm" style="font-size:10px;background:var(--b1);color:var(--b6);border:none;">Tâches ' + realLabel + '</button>' +
-        '<button onclick="event.stopPropagation();removePlan(\'' + day + '\',\'' + e.id + '\')" class="btn bd sm" style="font-size:10px;"' + (isFrozen?' title="Figé - déverrouillez d\'abord"':'') + '>Retirer</button>' +
+        '<div style="display:flex;align-items:center;gap:4px;min-width:0;">' + progBar + tachesBadge + '</div>' +
+        '<span onclick="event.stopPropagation();toggleFreeze(\'' + day + '\',\'' + e.id + '\')" title="'+(isFrozen?'Figé — cliquez pour libérer':'Figer cet équipement')+'" style="cursor:pointer;font-size:14px;">' + frozenIcon + '</span>' +
+        '<span style="font-size:11px;font-weight:700;color:'+realBorder+';min-width:32px;text-align:center;">'+(realPct>0?realPct+'%':'')+'</span>' +
+        '<button onclick="event.stopPropagation();removePlan(\'' + day + '\',\'' + e.id + '\')" class="btn bd sm" style="font-size:10px;"'+(isFrozen?' title="Figé — déverrouillez d\'abord"':'')+'>Retirer</button>' +
       '</div>' +
-      '<div id="' + did + '" style="display:none;background:var(--g50);border-top:1px solid var(--g200);padding:9px 11px;">' +
-        '<div class="fg fg3" style="gap:7px;">' +
-          '<div><label style="font-size:10px;">Technicien</label>' +
-            '<select onchange="spf(\'' + day + '\',\'' + e.id + '\',\'agent\',this.value)" style="font-size:11px;">' +
-              '<option value="">Non assigné</option>' +
-              APP.agents.filter(function(a) { return a.actif; }).map(function(a) {
-                return '<option ' + (d.agent===a.id?'selected':'') + ' value="' + a.id + '">' + (a.prenom||'') + ' ' + (a.nom||'') + ' (' + (a.metier||'').substring(0,4) + ')</option>';
-              }).join('') +
-            '</select></div>' +
-          '<div><label style="font-size:10px;">Heures</label><input type="number" min="0" max="12" value="' + (d.heures||8) + '" onchange="spf(\'' + day + '\',\'' + e.id + '\',\'heures\',this.value)" style="font-size:11px;"></div>' +
-          '<div><label style="font-size:10px;">% Réalisation</label>' +
-            '<select onchange="saveRealisationPlan(\'' + day + '\',\'' + e.id + '\',this.value)" style="font-size:11px;">' +
-              '<option value="">— Sélectionner —</option>' +
-              [25,50,75,100].map(function(v) { return '<option ' + (d.realisation==v?'selected':'') + ' value="'+v+'">'+v+'%</option>'; }).join('') +
-            '</select></div>' +
-          '<div><label style="font-size:10px;">Commentaire</label><input type="text" value="' + (d.commentaire||'') + '" onchange="spf(\'' + day + '\',\'' + e.id + '\',\'commentaire\',this.value)" style="font-size:11px;"></div>' +
+      // ── Corps dépliable : commentaire + tâches Suivi intégré ─────────
+      '<div id="plancard_body_'+e.id+'" style="display:none;border-top:1px solid var(--g200);">' +
+        // Commentaire + technicien (résumé rapide)
+        '<div style="display:flex;gap:8px;align-items:center;padding:7px 10px;background:var(--g50);flex-wrap:wrap;">' +
+          '<span style="font-size:10px;color:var(--g500);font-weight:600;">Commentaire :</span>' +
+          '<input type="text" value="'+(d.commentaire||'')+'" onchange="spf(\'' + day + '\',\'' + e.id + '\',\'commentaire\',this.value)" placeholder="Observations..." style="flex:1;font-size:11px;padding:3px 6px;border:1px solid var(--g200);border-radius:4px;min-width:120px;">' +
+          '<span style="font-size:10px;color:var(--g500);font-weight:600;">Pièces&nbsp;:</span>' +
         '</div>' +
-      '</div></div>';
+        // ── Interface Suivi des Tâches intégrée ──────────────────────
+        '<div style="padding:0;">' +
+          buildSuiviTachesBodyForPlan(e.id) +
+        '</div>' +
+      '</div>' +
+    '</div>';
   });
+
+  // Zone ajout manuel
   h += '<div class="stitle mt3 mb2" style="font-size:11px;">Ajouter au planning</div><div style="display:flex;flex-wrap:wrap;gap:4px;">';
-  pannes.slice(0,50).forEach(function(e) { h += '<button onclick="addPlan(\'' + day + '\',\'' + e.id + '\')" class="btn bs sm" style="font-size:10px;">+ ' + e.code + '</button>'; });
+  pannes.slice(0,50).forEach(function(e2) { h += '<button onclick="addPlan(\'' + day + '\',\'' + e2.id + '\')" class="btn bs sm" style="font-size:10px;">+ ' + e2.code + '</button>'; });
   if (pannes.length > 50) h += '<span class="tx tg" style="align-self:center;">+' + (pannes.length-50) + ' autres...</span>';
   h += '</div>';
   c.innerHTML = h;
+}
+
+// ── Toggle card planning (dépliable) ──────────────────────────────────────
+function togPlanCard(eid, day) {
+  var body = document.getElementById('plancard_body_' + eid);
+  if (!body) return;
+  var isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+}
+
+// ── Version allégée de buildSuiviTachesBody pour intégration dans Planning ─
+function buildSuiviTachesBodyForPlan(eid) {
+  var taches = getSuiviEquipTaches(eid);
+  var labels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  var agentOpts = APP.agents.filter(function(a){ return a.actif; }).map(function(a) {
+    return '<option value="' + a.id + '">' + agentCode(a) + '</option>';
+  }).join('');
+
+  var rows = taches.map(function(t, i) {
+    var isDone = t.done;
+    var rhDisplay = t.rh && t.rh.length ? t.rh.map(function(aid){
+      var ag = APP.agents.find(function(a){ return a.id === aid; });
+      return ag ? agentCode(ag) : aid;
+    }).join('; ') : '—';
+    var rowStyle = isDone
+      ? 'background:#f0fdf4;'
+      : (i%2===0?'background:#fff;':'background:var(--g50);');
+
+    return '<div style="'+rowStyle+'display:grid;grid-template-columns:26px 55px 1fr 1fr 150px 36px 34px;align-items:center;gap:6px;padding:6px 12px;border-bottom:1px solid var(--g100);">' +
+      '<span style="font-weight:800;color:var(--b5);font-size:11px;">' + (labels[i]||i+1) + '</span>' +
+      '<span style="font-size:10px;color:var(--g500);background:var(--g100);border-radius:4px;padding:1px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="'+escH(t.nom||'')+'">'+escH((t.nom||'').substring(0,8))+'</span>' +
+      '<input type="text" value="'+escH(t.nom||'')+'" onchange="updateSuiviTacheField(\''+eid+'\',\''+t.id+'\',\'nom\',this.value)" placeholder="Type tâche..." style="font-size:10px;padding:2px 5px;border:1px solid var(--g200);border-radius:4px;'+(isDone?'text-decoration:line-through;color:var(--g400);background:var(--g50);':'')+'")>' +
+      '<input type="text" value="'+escH(t.desc||'')+'" onchange="updateSuiviTacheFieldAndSave(\''+eid+'\',\''+t.id+'\',\'desc\',this.value)" placeholder="Description..." style="font-size:10px;padding:2px 5px;border:1px solid var(--g200);border-radius:4px;width:100%;'+(isDone?'text-decoration:line-through;color:var(--g400);background:var(--g50);':'')+'")>' +
+      '<div onclick="openRHPicker(\''+eid+'\',\''+t.id+'\')" style="font-size:10px;padding:2px 6px;border:1px solid var(--g200);border-radius:4px;cursor:pointer;background:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="'+escH(rhDisplay)+'">' +
+        '👷 '+escH(rhDisplay.substring(0,18))+(rhDisplay.length>18?'…':'') +
+      '</div>' +
+      '<input type="checkbox" '+(isDone?'checked':'')+' onchange="validateSuiviTache(\''+eid+'\',\''+t.id+'\',this.checked)" style="width:18px;height:18px;cursor:pointer;accent-color:var(--grn);">' +
+      '<button onclick="delSuiviTache(\''+eid+'\',\''+t.id+'\')" title="Supprimer" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:13px;padding:0;">🗑</button>' +
+    '</div>';
+  }).join('');
+
+  var addRow = '<div style="padding:7px 12px;border-top:1px solid var(--b1);background:var(--b0);display:flex;gap:7px;align-items:center;flex-wrap:wrap;">' +
+    '<span style="font-size:10px;font-weight:700;color:var(--b5);">+ Tâche :</span>' +
+    '<select id="ntnom_'+eid+'" style="font-size:10px;padding:3px 6px;border:1px solid var(--g200);border-radius:4px;">' +
+      '<option value="">— Type tâche —</option>' +
+      (APP.tacheTypes||['01-MECANIQUE','02-ELECTRIQUE','03-HYDRAULIQUE','04-DIAGNOSTIC','05-PNEUMATIQUE','06-SOUDURE','07-CARROSSERIE','08-ADMINISTRATIVES','09-AUTRES']).map(function(t){
+        return '<option value="'+t+'">'+t+'</option>';
+      }).join('') +
+    '</select>' +
+    '<input type="text" id="ntdesc_'+eid+'" placeholder="Description..." style="flex:1;font-size:10px;padding:3px 6px;border:1px solid var(--g200);border-radius:4px;min-width:100px;" onkeydown="if(event.key===\'Enter\')addSuiviTacheFromPlan(\''+eid+'\')">' +
+    '<button onclick="addSuiviTacheFromPlan(\''+eid+'\')" class="btn bp sm" style="font-size:10px;white-space:nowrap;">+ Ajouter</button>' +
+  '</div>';
+
+  var emptyMsg = !taches.length ? '<div style="padding:8px 12px;color:var(--g400);font-size:11px;font-style:italic;">Aucune tâche — ajoutez ci-dessous.</div>' : '';
+  return (taches.length ? rows : emptyMsg) + addRow;
+}
+
+// ── addSuiviTache depuis le planning intégré ─────────────────────────────
+function addSuiviTacheFromPlan(eid) {
+  var nomEl  = document.getElementById('ntnom_'  + eid);
+  var descEl = document.getElementById('ntdesc_' + eid);
+  var nom    = nomEl  ? nomEl.value.trim()  : '';
+  var desc   = descEl ? descEl.value.trim() : '';
+  if (!nom && !desc) { toast('Saisissez un type ou une description.'); return; }
+  var taches   = getSuiviEquipTaches(eid);
+  var newTache = { id:'t'+Date.now()+'_'+Math.random().toString(36).slice(2,6), nom:nom, desc:desc, rh:[], done:false, addedBy:ROLE, addedAt:Date.now() };
+  taches.push(newTache);
+  _stampField('suivi.addTask.'+eid+'.'+newTache.id);
+  saveApp();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
+  if (nomEl)  nomEl.value  = '';
+  if (descEl) descEl.value = '';
+  // Rafraîchir seulement le corps de la card
+  var body = document.getElementById('plancard_body_' + eid);
+  if (body) {
+    var taskDiv = body.querySelector('.suivi-inline-tasks');
+    if (taskDiv) taskDiv.innerHTML = buildSuiviTachesBodyForPlan(eid);
+    else renderPlanDay(curPlanDay||'lundi');
+  } else renderPlanDay(curPlanDay||'lundi');
+  toast('✅ Tâche ajoutée.');
+}
+
+// ── updateSuiviTacheField avec sauvegarde Firebase ──────────────────────
+function updateSuiviTacheFieldAndSave(eid, tid, field, val) {
+  var taches = getSuiviEquipTaches(eid);
+  var t = taches.find(function(x){ return x.id === tid; });
+  if (t) {
+    t[field] = val;
+    _stampField('suivi.'+field+'.'+eid+'.'+tid);
+    saveApp();
+    if (_fbApp && _fbDB) _fbWriteToCloud();
+  }
 }
 
 function renderStatusBadge(e, day) {
@@ -6588,15 +6697,35 @@ function validateSuiviTache(eid, tid, isDone) {
 function updateSuiviTacheField(eid, tid, field, val) {
   var taches = getSuiviEquipTaches(eid);
   var t = taches.find(function(x){ return x.id === tid; });
-  if (t) { t[field] = val; saveApp(); }
+  if (t) {
+    t[field] = val;
+    _stampField('suivi.' + field + '.' + eid + '.' + tid);
+    saveApp();
+    if (_fbApp && _fbDB) _fbWriteToCloud();
+  }
 }
 
 function refreshSuiviBlock(eid) {
-  // Refresh just this block's header pct + body
-  var block = document.getElementById('suiviblock_' + eid);
-  if (!block) { renderSuiviEquipsList(); return; }
-  // Re-render the whole list (simple, ensures consistency)
-  renderSuiviEquipsList();
+  // V19: tâches intégrées dans Planning — rafraîchir le plancard si visible
+  var planBody = document.getElementById('plancard_body_' + eid);
+  if (planBody && planBody.style.display !== 'none') {
+    // Reconstruire seulement le corps de la card
+    planBody.innerHTML =
+      '<div style="display:flex;gap:8px;align-items:center;padding:7px 10px;background:var(--g50);flex-wrap:wrap;">' +
+        '<span style="font-size:10px;color:var(--g500);font-weight:600;">Commentaire :</span>' +
+        '<input type="text" placeholder="Observations..." style="flex:1;font-size:11px;padding:3px 6px;border:1px solid var(--g200);border-radius:4px;min-width:120px;">' +
+      '</div>' +
+      '<div>' + buildSuiviTachesBodyForPlan(eid) + '</div>';
+    return;
+  }
+  // Fallback: rafraîchir la liste Suivi si visible
+  var suiviBlock = document.getElementById('suiviblock_' + eid);
+  if (suiviBlock) {
+    renderSuiviEquipsList();
+    return;
+  }
+  // Aucune card visible — re-rendre le planning
+  try { renderPlanDay(curPlanDay || 'lundi'); } catch(e) {}
 }
 
 // RH Picker modal (inline overlay)
@@ -7478,31 +7607,41 @@ function buildReportHTML(forPrint) {
   // V8: Plan rows with detailed task progress
   var planRows = plannedWithReal.map(function(item, idx){
     var e = item.e, rPct = item.rPct;
-    var bc = rPct>=100?'#dcfce7;color:#166534':rPct>=75?'#d1fae5;color:#065f46':rPct>=50?'#fed7aa;color:#92400e':rPct>=25?'#fef9c3;color:#713f12':'#f1f5f9;color:#94a3b8';
-    var statBg = e.statut==='OK'?'#dcfce7;color:#166534':'#fee2e2;color:#991b1b';
-    var progWidth = rPct + '%';
-    var progColor = rPct>=100?'#10b981':rPct>=75?'#10b981':rPct>=50?'#f97316':'#eab308';
-    var rows = '<tr style="background:#f0f4ff;">' +
-      '<td style="padding:4px 6px;"><strong style="font-size:11px;">' + (idx+1) + '. ' + e.code + '</strong></td>' +
-      '<td style="font-size:9px;">' + e.famille + '</td>' +
-      '<td style="font-size:9px;max-width:160px;">' + (e.desc||'').substring(0,55) + '</td>' +
-      '<td><div style="display:flex;align-items:center;gap:4px;"><div style="flex:1;height:5px;background:#e2e8f0;border-radius:2px;"><div style="height:5px;width:'+progWidth+';background:'+progColor+';border-radius:2px;"></div></div><span style="font-size:9px;font-weight:700;color:'+progColor+';">'+rPct+'%</span></div></td>' +
-      '<td><span style="background:' + statBg + ';padding:1px 5px;border-radius:6px;font-size:9px;font-weight:700;">' + e.statut + '</span></td>' +
-      (item.comment ? '<td style="font-size:9px;color:#64748b;">' + item.comment + '</td>' : '<td></td>') + '</tr>';
-    // V8: Suivi taches detail
-    if (item.suiviTaches && item.suiviTaches.length) {
-      var labels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-      item.suiviTaches.forEach(function(t, ti) {
-        var rhNames = (t.rh||[]).map(function(aid){ var a=APP.agents.find(function(x){return x.id===aid;}); return a?a.nom:aid; }).join('; ');
-        rows += '<tr style="background:#fafafa;border-left:2px solid ' + progColor + ';">' +
-          '<td style="padding:2px 6px 2px 18px;font-size:9px;color:#64748b;font-weight:700;">' + (labels[ti]||ti+1) + '</td>' +
-          '<td style="font-size:9px;" colspan="2">' + (t.nom||'') + (t.desc ? ' — <span style="color:#64748b;">' + t.desc + '</span>' : '') + '</td>' +
-          '<td style="font-size:9px;color:#475569;">' + (rhNames||'—') + '</td>' +
-          '<td colspan="2"><span style="font-size:9px;font-weight:700;color:' + (t.done?'#10b981':'#94a3b8') + ';">' + (t.done?'✓ Validé':'En cours') + '</span></td></tr>';
-      });
-    }
+    var progColor = rPct>=100?'#10b981':rPct>=75?'#10b981':rPct>=50?'#f97316':rPct>=25?'#eab308':'#94a3b8';
+    var statBg  = e.statut==='OK'?'#dcfce7;color:#166534':'#fee2e2;color:#991b1b';
+    var rowBg   = rPct>=100?'#f0fdf4':rPct>=75?'#f0fdf4':rPct>=50?'#fff7ed':rPct>=25?'#fefce8':'#f8fafc';
+    var progBar = '<div style="display:flex;align-items:center;gap:4px;"><div style="flex:1;height:5px;background:#e2e8f0;border-radius:2px;"><div style="height:5px;width:'+rPct+'%;background:'+progColor+';border-radius:2px;"></div></div><strong style="font-size:9px;color:'+progColor+';">'+rPct+'%</strong></div>';
+
+    // Ligne équipement principale
+    var rows = '<tr style="background:'+rowBg+';border-left:3px solid '+progColor+';">' +
+      '<td style="padding:5px 6px;"><strong style="font-size:11px;color:#1e3a5f;">' + (idx+1) + '. ' + e.code + '</strong></td>' +
+      '<td style="font-size:9px;color:#64748b;">' + (e.famille||'—') + '</td>' +
+      '<td style="font-size:9px;max-width:160px;color:#374151;">' + (e.desc||'').substring(0,55) + '</td>' +
+      '<td>' + progBar + '</td>' +
+      '<td><span style="background:'+statBg+';padding:1px 6px;border-radius:6px;font-size:9px;font-weight:700;">'+e.statut+'</span></td>' +
+      '<td style="font-size:9px;color:#64748b;">' + (item.comment||'') + '</td>' +
+    '</tr>';
+
+    // Sous-lignes tâches hiérarchiques (A, B, C...)
+    var labels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    (item.suiviTaches||[]).forEach(function(t, ti) {
+      var rhNames = (t.rh||[]).map(function(aid){
+        var a = APP.agents.find(function(x){ return x.id===aid; });
+        return a ? agentCode(a) : aid;
+      }).join('; ');
+      var doneStyle = t.done ? 'text-decoration:line-through;color:#9ca3af;' : '';
+      var doneBadge = t.done ? '<span style="color:#10b981;font-size:9px;">✓</span>' : '';
+      rows += '<tr style="background:'+(t.done?'#f9fafb':'#fff')+';border-left:3px solid '+(t.done?'#10b981':progColor)+';">' +
+        '<td style="padding:3px 6px 3px 22px;font-size:9px;color:'+progColor+';font-weight:800;">'+doneBadge+(labels[ti]||ti+1)+'</td>' +
+        '<td style="font-size:9px;color:#6b7280;">' + (t.nom||'—') + '</td>' +
+        '<td style="font-size:9px;'+doneStyle+'">' + (t.desc||'—').substring(0,60) + '</td>' +
+        '<td colspan="2" style="font-size:9px;color:#374151;">👷 ' + (rhNames||'—') + '</td>' +
+        '<td style="font-size:9px;font-weight:700;color:'+(t.done?'#10b981':'#f97316')+';">' + (t.done?'✅ Clôturée':'🔄 En cours') + '</td>' +
+        '<td style="font-size:9px;color:#94a3b8;">' + ((t.done&&t.doneAt)?new Date(t.doneAt).toLocaleDateString('fr-FR'):'—') + '</td>' +
+      '</tr>';
+    });
     return rows;
-  }).join('');
+  }).join('');;
 
   var dmRows = APP.dm.slice(0,6).map(function(d){
     return '<tr><td style="font-size:9px;">' + d.dest.substring(0,25) + '</td>' +
@@ -8389,6 +8528,177 @@ function _saveDynPermissions() {
     console.error('permissions save:', e.message);
     toast('\u26a0 Erreur lors de la sauvegarde des permissions.');
   });
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════
+// JOURNAL DES TÂCHES — Module V19.0
+// Registre historique chronologique (lecture seule) de toutes les tâches
+// ══════════════════════════════════════════════════════════════════════════
+
+function _buildJournalData() {
+  // Collecter toutes les tâches de toutes les semaines de APP.suiviTaches
+  var rows = [];
+  var weeks = Object.keys(APP.suiviTaches || {}).sort().reverse();
+  weeks.forEach(function(wk) {
+    var weekData = APP.suiviTaches[wk] || {};
+    Object.keys(weekData).forEach(function(eid) {
+      var entry = weekData[eid];
+      var taches = Array.isArray(entry) ? entry : (entry && Array.isArray(entry.taches) ? entry.taches : []);
+      var deleted = entry && entry._deletedTaskIds ? entry._deletedTaskIds : [];
+      var eq = APP.equips.find(function(e){ return e.id === eid; }) || { code: eid, famille: '—', desc: '—', statut: '—' };
+      taches.forEach(function(t) {
+        var isDeleted = deleted.indexOf(t.id) !== -1;
+        var rhNames = (t.rh || []).map(function(aid){
+          var ag = APP.agents.find(function(a){ return a.id === aid; });
+          return ag ? agentCode(ag) : aid;
+        }).join('; ');
+        rows.push({
+          wk: wk, eid: eid, tid: t.id,
+          code: eq.code, famille: eq.famille || '—', statut: eq.statut || '—',
+          panneDesc: eq.desc || '—',
+          tacheType: t.nom || '—',
+          tacheDesc: t.desc || '—',
+          rh: rhNames || '—',
+          done: !!t.done,
+          doneAt: t.doneAt || null,
+          addedAt: t.addedAt || null,
+          isDeleted: isDeleted
+        });
+      });
+    });
+  });
+  // Tri: plus récent en haut (addedAt desc)
+  rows.sort(function(a, b){ return (b.addedAt||0) - (a.addedAt||0); });
+  return rows;
+}
+
+function renderJournal() {
+  var root = document.getElementById('journal-root') || document.getElementById('page-journal');
+  if (!root) return;
+  var allRows = _buildJournalData();
+
+  // ── KPIs ──────────────────────────────────────────────────────────────
+  var total   = allRows.length;
+  var done    = allRows.filter(function(r){ return r.done && !r.isDeleted; }).length;
+  var inProg  = allRows.filter(function(r){ return !r.done && !r.isDeleted; }).length;
+  var deleted = allRows.filter(function(r){ return r.isDeleted; }).length;
+  // Temps moyen de clôture (ms)
+  var closedRows = allRows.filter(function(r){ return r.done && r.doneAt && r.addedAt && !r.isDeleted; });
+  var avgClose  = closedRows.length ? Math.round(closedRows.reduce(function(s,r){ return s+(r.doneAt-r.addedAt); },0)/closedRows.length/3600000) : null;
+  // Tâche la plus redondante (type)
+  var typeCount = {};
+  allRows.filter(function(r){ return !r.isDeleted; }).forEach(function(r){ typeCount[r.tacheType] = (typeCount[r.tacheType]||0)+1; });
+  var topType = Object.keys(typeCount).sort(function(a,b){ return typeCount[b]-typeCount[a]; })[0] || '—';
+
+  var h = '<div style="margin-bottom:12px;">' +
+    '<div class="stitle" style="font-size:15px;margin-bottom:8px;">📔 Journal des Tâches &mdash; Registre Historique</div>' +
+    // KPIs
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">' +
+      '<div class="kcard" style="flex:1;min-width:110px;border-left:4px solid #3b82f6;"><div class="kv">' + total + '</div><div class="kl">Total tâches</div></div>' +
+      '<div class="kcard" style="flex:1;min-width:110px;border-left:4px solid #10b981;"><div class="kv">' + done + '</div><div class="kl">Clôturées</div></div>' +
+      '<div class="kcard" style="flex:1;min-width:110px;border-left:4px solid #f97316;"><div class="kv">' + inProg + '</div><div class="kl">En cours</div></div>' +
+      '<div class="kcard" style="flex:1;min-width:110px;border-left:4px solid #ef4444;"><div class="kv">' + deleted + '</div><div class="kl">Supprimées</div></div>' +
+      (avgClose!==null?'<div class="kcard" style="flex:1;min-width:110px;border-left:4px solid #8b5cf6;"><div class="kv">' + avgClose + 'h</div><div class="kl">Durée moy. clôture</div></div>':'') +
+      '<div class="kcard" style="flex:1;min-width:130px;border-left:4px solid #eab308;"><div class="kv" style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + topType.substring(0,14) + '</div><div class="kl">Type le + fréquent</div></div>' +
+    '</div>' +
+    // Filtres
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">' +
+      '<select id="jf-code" onchange="renderJournal()" style="font-size:11px;padding:4px 7px;border:1px solid var(--g200);border-radius:5px;">' +
+        '<option value="">Tous les codes</option>' +
+        Array.from(new Set(allRows.map(function(r){return r.code;}))).sort().map(function(c){ return '<option value="'+c+'">'+c+'</option>'; }).join('') +
+      '</select>' +
+      '<select id="jf-famille" onchange="renderJournal()" style="font-size:11px;padding:4px 7px;border:1px solid var(--g200);border-radius:5px;">' +
+        '<option value="">Toutes familles</option>' +
+        Array.from(new Set(allRows.map(function(r){return r.famille;}))).sort().map(function(f){ return '<option value="'+f+'">'+f+'</option>'; }).join('') +
+      '</select>' +
+      '<select id="jf-type" onchange="renderJournal()" style="font-size:11px;padding:4px 7px;border:1px solid var(--g200);border-radius:5px;">' +
+        '<option value="">Tous types tâches</option>' +
+        Object.keys(typeCount).sort().map(function(t){ return '<option value="'+t+'">'+t+'</option>'; }).join('') +
+      '</select>' +
+      '<select id="jf-rh" onchange="renderJournal()" style="font-size:11px;padding:4px 7px;border:1px solid var(--g200);border-radius:5px;">' +
+        '<option value="">Tous agents</option>' +
+        APP.agents.filter(function(a){return a.actif;}).map(function(a){ return '<option value="'+agentCode(a)+'">'+agentCode(a)+'</option>'; }).join('') +
+      '</select>' +
+      '<select id="jf-statut" onchange="renderJournal()" style="font-size:11px;padding:4px 7px;border:1px solid var(--g200);border-radius:5px;">' +
+        '<option value="">Tous statuts</option>' +
+        '<option value="done">✅ Clôturées</option>' +
+        '<option value="inprog">🔄 En cours</option>' +
+        '<option value="deleted">🗑 Supprimées</option>' +
+      '</select>' +
+      '<button onclick="document.querySelectorAll(\'#jf-code,#jf-famille,#jf-type,#jf-rh,#jf-statut\').forEach(function(s){s.value=\'\';});renderJournal();" class="btn bd sm" style="font-size:10px;">✕ Réinit.</button>' +
+    '</div>' +
+  '</div>';
+
+  // Appliquer les filtres
+  var fCode    = (document.getElementById('jf-code')    || {}).value || '';
+  var fFam     = (document.getElementById('jf-famille') || {}).value || '';
+  var fType    = (document.getElementById('jf-type')    || {}).value || '';
+  var fRH      = (document.getElementById('jf-rh')      || {}).value || '';
+  var fStatut  = (document.getElementById('jf-statut')  || {}).value || '';
+
+  var filtered = allRows.filter(function(r){
+    if (fCode   && r.code       !== fCode)   return false;
+    if (fFam    && r.famille    !== fFam)    return false;
+    if (fType   && r.tacheType  !== fType)   return false;
+    if (fRH     && r.rh.indexOf(fRH) === -1) return false;
+    if (fStatut === 'done'    && (!r.done || r.isDeleted))  return false;
+    if (fStatut === 'inprog'  && (r.done  || r.isDeleted))  return false;
+    if (fStatut === 'deleted' && !r.isDeleted)              return false;
+    return true;
+  });
+
+  if (!filtered.length) {
+    root.innerHTML = h + '<div class="al ai">Aucune tâche trouvée dans le journal pour ces filtres.</div>';
+    return;
+  }
+
+  // Tableau
+  h += '<div style="overflow-x:auto;">' +
+    '<table style="width:100%;border-collapse:collapse;font-size:10px;">' +
+    '<thead><tr style="background:var(--b5);color:#fff;">' +
+      '<th style="padding:6px;text-align:left;">Code</th>' +
+      '<th style="padding:6px;text-align:left;">Famille</th>' +
+      '<th style="padding:6px;text-align:left;">Statut équip.</th>' +
+      '<th style="padding:6px;text-align:left;">Date ouverture</th>' +
+      '<th style="padding:6px;text-align:left;">Desc. panne</th>' +
+      '<th style="padding:6px;text-align:left;">Type tâche</th>' +
+      '<th style="padding:6px;text-align:left;">Desc. tâche</th>' +
+      '<th style="padding:6px;text-align:left;">Agents RH</th>' +
+      '<th style="padding:6px;text-align:left;">Avancement</th>' +
+      '<th style="padding:6px;text-align:left;">Date clôture</th>' +
+    '</tr></thead><tbody>';
+
+  filtered.forEach(function(r) {
+    var isDeleted = r.isDeleted;
+    var isDone    = r.done && !isDeleted;
+    var isInProg  = !r.done && !isDeleted;
+    // Couleurs selon avancement
+    var rowBg, textStyle = '', pctLabel;
+    if (isDeleted)    { rowBg = '#fff0f0'; textStyle = 'text-decoration:line-through;color:#b91c1c;'; pctLabel = '—'; }
+    else if (isDone)  { rowBg = '#f0fdf4'; pctLabel = '100% ✅'; }
+    else              { rowBg = '#fff'; pctLabel = 'En cours'; }
+
+    var openDate  = r.addedAt ? new Date(r.addedAt).toLocaleDateString('fr-FR') : '—';
+    var closeDate = (r.done && r.doneAt) ? new Date(r.doneAt).toLocaleDateString('fr-FR') : '—';
+    var statBg    = r.statut==='OK'?'#dcfce7;color:#166534':'#fee2e2;color:#991b1b';
+
+    h += '<tr style="background:'+rowBg+';border-bottom:1px solid var(--g100);">' +
+      '<td style="padding:5px 6px;font-weight:700;color:var(--b5);'+textStyle+'">'+escH(r.code)+'</td>' +
+      '<td style="padding:5px 6px;'+textStyle+'">'+escH(r.famille)+'</td>' +
+      '<td style="padding:5px 6px;"><span style="background:'+statBg+';padding:1px 5px;border-radius:5px;font-size:9px;font-weight:700;">'+escH(r.statut)+'</span></td>' +
+      '<td style="padding:5px 6px;color:#64748b;">'+openDate+'</td>' +
+      '<td style="padding:5px 6px;max-width:130px;'+textStyle+'" title="'+escH(r.panneDesc)+'">'+escH(r.panneDesc.substring(0,40))+(r.panneDesc.length>40?'…':'')+'</td>' +
+      '<td style="padding:5px 6px;'+textStyle+'">'+escH(r.tacheType)+'</td>' +
+      '<td style="padding:5px 6px;max-width:160px;'+textStyle+'" title="'+escH(r.tacheDesc)+'">'+escH(r.tacheDesc.substring(0,45))+(r.tacheDesc.length>45?'…':'')+'</td>' +
+      '<td style="padding:5px 6px;"+textStyle+">'+escH(r.rh)+'</td>' +
+      '<td style="padding:5px 6px;font-weight:700;color:'+(isDone?'#10b981':isDeleted?'#ef4444':'#f97316')+';'+textStyle+'">'+pctLabel+'</td>' +
+      '<td style="padding:5px 6px;color:#64748b;">'+closeDate+'</td>' +
+    '</tr>';
+  });
+
+  h += '</tbody></table></div>';
+  root.innerHTML = h;
 }
 
 // Init sync badge
