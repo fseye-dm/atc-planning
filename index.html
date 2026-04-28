@@ -1091,7 +1091,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v19.0';
+var APP_VERSION = 'v19.1';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -2591,7 +2591,16 @@ function _fbSignIn() {
   });
 
   // ── Stratégie : Popup d'abord (instantané) → fallback Redirect si bloqué
-  _fbAuth.signInWithPopup(provider).then(function(result) {
+  // COOP fix: popup avec fallback redirect si Cross-Origin-Opener-Policy bloque
+  var _popupPromise = _fbAuth.signInWithPopup(provider);
+  _popupPromise.catch(function(err) {
+    if (err && (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user' ||
+        (err.message && err.message.indexOf('Cross-Origin') > -1))) {
+      console.log('Popup bloqué (COOP) → fallback redirect');
+      _fbAuth.signInWithRedirect(provider);
+    }
+  });
+  _popupPromise.then(function(result) {
     // Popup réussie (Chrome, Firefox, Edge sans protection stricte)
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
     console.log('Firebase: popup auth OK');
@@ -4433,6 +4442,78 @@ function buildGuidePage() {
     '<div style="text-align:center;font-size:10px;color:var(--g400);padding:12px;border-top:1px solid var(--g200);margin-top:8px;">' +
       'DM-PLANNING ' + APP_VERSION + ' · SOSETER HYDRO · Créé par F.SEYE — Directeur Matériel' +
     '</div>' +
+
+  // ══════ SYNOPTIQUE CHEF D'ATELIER ══════
+  '<div class="asect" style="margin-top:16px;">' +
+    '<div class="astitle" style="color:#059669;">&#128295; SYNOPTIQUE — Chef d\'Atelier : Votre flux de travail quotidien</div>' +
+    '<div style="padding:14px;">' +
+      // Flux principal sous forme de boîtes colorées avec flèches
+      '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:16px;">' +
+        '<div style="background:#dbeafe;border:2px solid #3b82f6;border-radius:10px;padding:10px 14px;text-align:center;min-width:110px;">' +
+          '<div style="font-size:18px;">&#128295;</div>' +
+          '<div style="font-size:11px;font-weight:700;color:#1d4ed8;">1. CONNEXION</div>' +
+          '<div style="font-size:9px;color:#3730a3;margin-top:3px;">Email + Mot de passe<br>Profil Chef d\'Atelier</div>' +
+        '</div>' +
+        '<div style="font-size:20px;color:#6b7280;">&#8594;</div>' +
+        '<div style="background:#fef9c3;border:2px solid #eab308;border-radius:10px;padding:10px 14px;text-align:center;min-width:110px;">' +
+          '<div style="font-size:18px;">&#128202;</div>' +
+          '<div style="font-size:11px;font-weight:700;color:#92400e;">2. DASHBOARD</div>' +
+          '<div style="font-size:9px;color:#78350f;margin-top:3px;">KPIs du parc<br>Alertes RH</div>' +
+        '</div>' +
+        '<div style="font-size:20px;color:#6b7280;">&#8594;</div>' +
+        '<div style="background:#dcfce7;border:2px solid #22c55e;border-radius:10px;padding:10px 14px;text-align:center;min-width:110px;">' +
+          '<div style="font-size:18px;">&#128203;</div>' +
+          '<div style="font-size:11px;font-weight:700;color:#166534;">3. PLANNING</div>' +
+          '<div style="font-size:9px;color:#14532d;margin-top:3px;">Voir Top 10 DM<br>Gérer ses tâches</div>' +
+        '</div>' +
+        '<div style="font-size:20px;color:#6b7280;">&#8594;</div>' +
+        '<div style="background:#fce7f3;border:2px solid #ec4899;border-radius:10px;padding:10px 14px;text-align:center;min-width:110px;">' +
+          '<div style="font-size:18px;">&#9989;</div>' +
+          '<div style="font-size:11px;font-weight:700;color:#9d174d;">4. VALIDER</div>' +
+          '<div style="font-size:9px;color:#831843;margin-top:3px;">Cocher tâches ✓<br>Affecter agents</div>' +
+        '</div>' +
+        '<div style="font-size:20px;color:#6b7280;">&#8594;</div>' +
+        '<div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:10px;padding:10px 14px;text-align:center;min-width:110px;">' +
+          '<div style="font-size:18px;">&#128196;</div>' +
+          '<div style="font-size:11px;font-weight:700;color:#6d28d9;">5. RAPPORT</div>' +
+          '<div style="font-size:9px;color:#5b21b6;margin-top:3px;">Rapport auto<br>Taux réalisation</div>' +
+        '</div>' +
+      '</div>' +
+
+      // Tableau des règles de priorité Chef simplifié
+      '<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px;margin-bottom:10px;">' +
+        '<div style="font-size:12px;font-weight:700;color:#166534;margin-bottom:8px;">&#128274; Vos priorités par défaut (V19)</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">' +
+          '<div style="font-size:10px;">' +
+            '<div style="font-weight:700;color:#059669;margin-bottom:4px;">✅ Le CHEF est prioritaire sur :</div>' +
+            '<ul style="margin:0;padding-left:16px;color:#374151;">' +
+              '<li>Statut équipement (PANNE/OK)</li>' +
+              '<li>Disponibilité des pièces</li>' +
+              '<li>Description de la panne</li>' +
+              '<li>Création / Suppression de tâches</li>' +
+              '<li>Validation des tâches (✓)</li>' +
+              '<li>Affectation des agents RH</li>' +
+              '<li>Commentaires terrain</li>' +
+            '</ul>' +
+          '</div>' +
+          '<div style="font-size:10px;">' +
+            '<div style="font-weight:700;color:#dc2626;margin-bottom:4px;">🔴 Le DM est prioritaire sur :</div>' +
+            '<ul style="margin:0;padding-left:16px;color:#374151;">' +
+              '<li>Top 10 (génération &amp; sélection)</li>' +
+              '<li>Priorités 1→5 des équipements</li>' +
+              '<li>Master Planning</li>' +
+              '<li>Ordonnancement &amp; critères</li>' +
+              '<li>Instructions DM</li>' +
+              '<li>Suppression équipements/agents</li>' +
+              '<li>Mode Standby</li>' +
+            '</ul>' +
+          '</div>' +
+        '</div>' +
+        '<div style="margin-top:8px;font-size:10px;color:#64748b;font-style:italic;">💡 En cas de modification simultanée — la règle ci-dessus détermine automatiquement quelle valeur est conservée lors de la synchronisation Firebase.</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>' +
+
   '</div>';
 }
 
@@ -4870,6 +4951,20 @@ if (ROLE === 'dm') {
         '<div style="text-align:center;padding:10px;background:var(--g50);border-radius:6px;"><div style="font-size:22px;font-weight:800;color:#f97316;">' + _activeEquips().filter(function(e){return e.statut==='PANNE';}).length + '</div><div style="font-size:10px;color:var(--g400);text-transform:uppercase;">En Panne</div></div>' +
       '</div>' +
     '</div>' +
+  // ══════════════════════════════════════════════════════════════════
+  // SECTION SÉCURITÉ — Mots de passe (DM uniquement)
+  // ══════════════════════════════════════════════════════════════════
+  '<div class="asect" style="margin-top:12px;">' +
+    '<div class="astitle">&#128274; Sécurité — Mots de passe</div>' +
+    '<div style="padding:12px;">' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">' +
+        '<span style="font-size:12px;color:var(--g600);">Modifier les mots de passe de connexion locale (DM / Chef d\'Atelier) :</span>' +
+        '<button onclick="openM(\'m-pw\')" class="btn bp sm" style="font-size:11px;">&#128274; Modifier les mots de passe</button>' +
+      '</div>' +
+      '<div style="margin-top:8px;font-size:10px;color:var(--g400);">&#9432; Les mots de passe sont stockés dans Firebase et synchronisés sur tous les postes.</div>' +
+    '</div>' +
+  '</div>' +
+
   '</div>'  // ferme la section DM-only
   )); // ferme le ternaire (ROLE !== 'dm') ? ... : (...)
 }
@@ -5961,9 +6056,9 @@ function renderPlanDay(day) {
     var doneCnt = taches.filter(function(t){return t.done;}).length;
     var totalCnt = taches.length;
     var progBar = totalCnt > 0
-      ? '<div style="flex:1;height:5px;background:#e2e8f0;border-radius:3px;overflow:hidden;margin:0 4px;"><div style="height:5px;width:'+realPct+'%;background:'+realBorder+';border-radius:3px;transition:width .3s;"></div></div>'
-      : '';
-    var tachesBadge = '<span style="font-size:10px;color:'+(totalCnt?realBorder:'var(--g400)')+';font-weight:700;">'+(totalCnt?doneCnt+'/'+totalCnt+' ✓':totalCnt+' tâche')+' </span>';
+      ? '<div style="flex:1;height:5px;background:#e2e8f0;border-radius:3px;overflow:hidden;margin:0 4px;"><div class="prog-bar-inner" style="height:5px;width:'+realPct+'%;background:'+realBorder+';border-radius:3px;transition:width .4s ease;"></div></div>'
+      : '<div style="flex:1;height:5px;background:#e2e8f0;border-radius:3px;margin:0 4px;"><div class="prog-bar-inner" style="height:5px;width:0%;background:var(--b5);border-radius:3px;"></div></div>';
+    var tachesBadge = '<span class="taches-badge" style="font-size:10px;color:'+(totalCnt?realBorder:'var(--g400)')+';font-weight:700;">'+(totalCnt?doneCnt+'/'+totalCnt+' ✓':'0 tâche')+' </span>';
 
     h += '<div class="card mb2" id="plancard_'+e.id+'" style="border-left:3px solid '+(isFrozen?'#7c3aed':realBorder)+';background:'+(realColor!=='transparent'?realColor:'#fff')+';">' +
       // ── Ligne principale (header de la card) ─────────────────────────
@@ -6706,25 +6801,45 @@ function updateSuiviTacheField(eid, tid, field, val) {
 }
 
 function refreshSuiviBlock(eid) {
-  // V19: tâches intégrées dans Planning — rafraîchir le plancard si visible
+  // V19: rafraîchir toute la card planning si visible (header + body)
+  var planCard = document.getElementById('plancard_' + eid);
   var planBody = document.getElementById('plancard_body_' + eid);
-  if (planBody && planBody.style.display !== 'none') {
-    // Reconstruire seulement le corps de la card
+  var bodyWasOpen = planBody && planBody.style.display !== 'none';
+
+  if (planCard) {
+    // Recalculer le % et les couleurs pour mettre à jour le HEADER
+    var suiviPct = computeEquipPct(eid);
+    var dayData = (APP.planning.daily[curPlanDay || 'lundi'] || {});
+    var dayRealPct = dayData[eid] ? parseInt(dayData[eid].realisation || 0) : 0;
+    var realPct = Math.max(suiviPct, dayRealPct);
+    var realBorder = realPct>=100?'#22c55e':realPct>=75?'#10b981':realPct>=50?'#f97316':realPct>=25?'#eab308':'var(--b5)';
+    var realColor  = realPct>=100?'#dcfce7':realPct>=75?'#d1fae5':realPct>=50?'#fed7aa':realPct>=25?'#fef9c3':'transparent';
+    // Mettre à jour la bordure et le fond de la card
+    planCard.style.borderLeftColor = realBorder;
+    planCard.style.background = realColor !== 'transparent' ? realColor : '#fff';
+    // Mettre à jour la barre de progression et le badge % dans le header
+    var taches = getSuiviEquipTaches(eid);
+    var doneCnt = taches.filter(function(t){ return t.done; }).length;
+    var totalCnt = taches.length;
+    var barInner = planCard.querySelector('.prog-bar-inner');
+    if (barInner) { barInner.style.width = realPct + '%'; barInner.style.background = realBorder; }
+    var pctLabel = planCard.querySelector('.pct-label');
+    if (pctLabel) { pctLabel.textContent = realPct > 0 ? realPct + '%' : ''; pctLabel.style.color = realBorder; }
+    var tBadge = planCard.querySelector('.taches-badge');
+    if (tBadge) { tBadge.textContent = totalCnt ? doneCnt + '/' + totalCnt + ' ✓' : '0 tâche'; tBadge.style.color = totalCnt ? realBorder : 'var(--g400)'; }
+  }
+
+  if (planBody) {
     planBody.innerHTML =
       '<div style="display:flex;gap:8px;align-items:center;padding:7px 10px;background:var(--g50);flex-wrap:wrap;">' +
         '<span style="font-size:10px;color:var(--g500);font-weight:600;">Commentaire :</span>' +
-        '<input type="text" placeholder="Observations..." style="flex:1;font-size:11px;padding:3px 6px;border:1px solid var(--g200);border-radius:4px;min-width:120px;">' +
+        '<input type="text" value="' + ((APP.planning.daily[curPlanDay||'lundi']||{})[eid]?(APP.planning.daily[curPlanDay||'lundi'][eid].commentaire||''):'') + '" onchange="spf(\''+( curPlanDay||'lundi')+'\',\''+eid+'\',\'commentaire\',this.value)" placeholder="Observations..." style="flex:1;font-size:11px;padding:3px 6px;border:1px solid var(--g200);border-radius:4px;min-width:120px;">' +
       '</div>' +
       '<div>' + buildSuiviTachesBodyForPlan(eid) + '</div>';
+    if (!bodyWasOpen) planBody.style.display = 'none';
     return;
   }
-  // Fallback: rafraîchir la liste Suivi si visible
-  var suiviBlock = document.getElementById('suiviblock_' + eid);
-  if (suiviBlock) {
-    renderSuiviEquipsList();
-    return;
-  }
-  // Aucune card visible — re-rendre le planning
+  // Fallback: re-rendre le planning complet
   try { renderPlanDay(curPlanDay || 'lundi'); } catch(e) {}
 }
 
@@ -7564,9 +7679,14 @@ function buildReportHTML(forPrint) {
   var dc = dispo>=60?'#10b981':'#ef4444';
 
   // V8: Strictly use top-10 planned equips from this week
-  var planned = (APP.planning.top10ids && APP.planning.top10ids.length)
-    ? APP.planning.top10ids
-    : getPlanned();
+  // BUG 4 FIX: afficher TOUS les équipements planifiés (top10 + ajouts manuels Chef)
+  var top10Set = APP.planning.top10ids || [];
+  var allIncluded = getPlanned(); // tous avec included=true dans les jours
+  // Union: top10 + ajouts manuels (sans doublons)
+  var planned = top10Set.slice();
+  allIncluded.forEach(function(id) {
+    if (planned.indexOf(id) === -1) planned.push(id);
+  });
 
   var bd = APP.planning.daily.vendredi || {};
   var wi = getWeekInfo();
@@ -8574,7 +8694,18 @@ function _buildJournalData() {
 }
 
 function renderJournal() {
-  var root = document.getElementById('journal-root') || document.getElementById('page-journal');
+  // Trouver ou créer le container du journal
+  var root = document.getElementById('journal-root');
+  if (!root) {
+    root = document.getElementById('page-journal');
+    if (!root) {
+      // page-journal créée dynamiquement par showPage — chercher dans #content
+      root = document.createElement('div');
+      root.id = 'journal-root';
+      var pageJournal = document.getElementById('page-journal') || document.getElementById('content');
+      if (pageJournal) pageJournal.appendChild(root);
+    }
+  }
   if (!root) return;
   var allRows = _buildJournalData();
 
