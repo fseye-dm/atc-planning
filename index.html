@@ -1091,7 +1091,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v19.2';
+var APP_VERSION = 'v20.0';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1835,8 +1835,12 @@ function _syncMerge(remote) {
   if (remote.priorityRules && typeof remote.priorityRules === 'object') {
     var remPrTs = (remote._fieldTs && remote._fieldTs['priorityRules']) || 0;
     var locPrTs = (APP.fieldTs && APP.fieldTs['priorityRules']) || 0;
-    // DM est la seule autorité sur les règles de priorité
-    if (remByDM || remPrTs > locPrTs) {
+    // A3 FIX: règles JAMAIS écrasées par le Chef — et protégées si verrouillées localement
+    // Si les règles locales sont verrouillées ET remote n'est pas DM → on refuse l'écrasement
+    var localLocked = !!APP.priorityRulesLocked;
+    var remoteIsDM  = remByDM;
+    var canApply    = remoteIsDM && (!localLocked || remPrTs > locPrTs);
+    if (canApply) {
       var changed2 = JSON.stringify(APP.priorityRules) !== JSON.stringify(remote.priorityRules);
       if (changed2) {
         APP.priorityRules = Object.assign({}, APP.priorityRules || {}, remote.priorityRules);
@@ -3793,7 +3797,7 @@ if (!APP.priorityRules) {
     'ord.pieces':            'chef',
     // ── PLANNING HEBDO ──────────────────────────── (conforme capture)
     'plan.included':         'dm',    // Sélection Top10 → DM
-    'plan.generateTop10':    'dm',    // Génération automatique → DM
+    'plan.generateTop10':    'chef',  // Génération Top10 → Cheftomatique → DM
     'plan.frozen':           'dm',    // Figer équipement → DM
     'plan.agent':            'chef',  // Agent affecté → Chef
     'plan.realisation':      'chef',  // % réalisation → Chef
@@ -4545,7 +4549,7 @@ function resetPriorityRules() {
     'equip.statut':'chef','equip.pieces':'chef','equip.desc':'chef','equip.anomalies':'chef',
     'equip.create':'chef','equip.delete':'dm','equip.deleted':'dm','equip.standby':'dm','equip.priority':'dm',
     'ord.criteriaOrder':'dm','ord.priority':'dm','ord.pieces':'chef',
-    'plan.included':'dm','plan.generateTop10':'dm','plan.frozen':'dm',
+    'plan.included':'dm','plan.generateTop10':'chef','plan.frozen':'dm',
     'plan.agent':'chef','plan.realisation':'chef','plan.commentaire':'chef','plan.pieces':'chef','plan.rptComment':'chef',
     'mp.cell':'dm','masterplanLocked':'dm',
     'dm.text':'dm','dm.priority':'dm','dm.dest':'dm','dm.executed':'dm','dm.comment':'chef','dm.deleteInstruction':'dm','dm.create':'dm',
@@ -4956,7 +4960,30 @@ if (ROLE === 'dm') {
   // SECTION SÉCURITÉ — Mots de passe (DM uniquement)
   // ══════════════════════════════════════════════════════════════════
   '<div class="asect" style="margin-top:12px;">' +
-    '<div class="astitle">&#128274; Sécurité — Mots de passe</div>' +
+    // ── B2: Identité du logiciel ─────────────────────────────────────────
+  '<div class="asect" style="margin-top:12px;">' +
+    '<div class="astitle">&#9881; Identité du logiciel</div>' +
+    '<div style="padding:12px;">' +
+      '<div style="font-size:10px;color:var(--g500);margin-bottom:10px;">Ces valeurs sont stockées dans Firebase (/app_settings/config) et s\'appliquent sur tous les postes.</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;">' +
+        '<div style="flex:1;min-width:170px;">' +
+          '<label style="font-size:10px;font-weight:700;">Nom du logiciel</label>' +
+          '<div style="display:flex;gap:6px;margin-top:3px;">' +
+            '<input id="cfg-appname" type="text" value="' + (APP_CONFIG.nomLogiciel||'DM-PLANNING') + '" style="flex:1;font-size:11px;padding:4px 7px;border:1px solid var(--g200);border-radius:4px;">' +
+            '<button onclick="saveAppConfig(\'nomLogiciel\',document.getElementById(\'cfg-appname\').value)" class="btn bp sm" style="font-size:10px;">&#10003;</button>' +
+          '</div>' +
+        '</div>' +
+        '<div style="flex:1;min-width:170px;">' +
+          '<label style="font-size:10px;font-weight:700;">Signature (après Créé par F.SEYE)</label>' +
+          '<div style="display:flex;gap:6px;margin-top:3px;">' +
+            '<input id="cfg-sig" type="text" value="' + (APP_CONFIG.signature||'Asset Manager') + '" style="flex:1;font-size:11px;padding:4px 7px;border:1px solid var(--g200);border-radius:4px;">' +
+            '<button onclick="saveAppConfig(\'signature\',document.getElementById(\'cfg-sig\').value)" class="btn bp sm" style="font-size:10px;">&#10003;</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>' +
+  '<div class="astitle">&#128274; Sécurité — Mots de passe</div>' +
     '<div style="padding:12px;">' +
       '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">' +
         '<span style="font-size:12px;color:var(--g600);">Modifier les mots de passe de connexion locale (DM / Chef d\'Atelier) :</span>' +
@@ -5999,6 +6026,11 @@ function unlockMP() {
 }
 
 function toggleMP(eid, mk) {
+  // A5 FIX: bloquer toute modification si le plan est verrouillé (DM ou Chef)
+  if (isMPLocked()) {
+    toast('\uD83D\uDD12 Plan verrouill\u00e9 \u2014 demandez au Dir. Mat\u00e9riel de d\u00e9verrouiller.');
+    return;
+  }
   var key = eid + '_' + mk;
   var cur = APP.masterplan[key] || '';
   APP.masterplan[key] = cur === 'plan' ? 'done' : cur === 'done' ? '' : 'plan';
@@ -6065,9 +6097,9 @@ function renderPlanDay(day) {
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
     '<div class="ts tg">' + planned.length + '/10 équipement(s) &mdash; <span style="font-size:10px;color:var(--g400);">Max 10 recommandé</span></div>' +
-    (ROLE === 'dm'
-    ? '<button class="btn bp sm" onclick="autoGeneratePlanning()" style="font-size:10px;" title="Générer le Top 10 de la semaine">⚡ Générer Top 10</button>'
-    : '<span style="font-size:10px;color:var(--g400);font-style:italic;">Top 10 généré par le Dir. Matériel</span>') +
+    (ROLE !== 'dm'
+    ? '<button class="btn bp sm" onclick="autoGeneratePlanning()" style="font-size:10px;" title="Générer le Top 10 — Chef d\'Atelier">⚡ Générer Top 10</button>'
+    : '<span style="font-size:10px;color:var(--g400);font-style:italic;">Top 10 géré par le Chef d\'Atelier</span>') +
   '</div>';
   if (!planned.length) h += '<div class="al ai">Aucun équipement. Cliquez "Générer depuis MP" ou ajoutez manuellement ci-dessous.</div>';
 
@@ -6251,10 +6283,19 @@ function dmToggleStatus(eid, day) {
 function toggleFreeze(day, eid) {
   if (!APP.planning.daily[day]) APP.planning.daily[day] = {};
   if (!APP.planning.daily[day][eid]) APP.planning.daily[day][eid] = {included:true};
-  var cur = APP.planning.daily[day][eid].frozen;
-  APP.planning.daily[day][eid].frozen = !cur;
+  var cur = !!APP.planning.daily[day][eid].frozen;
+  var newState = !cur;
+  var allDays = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+  allDays.forEach(function(d) {
+    if (!APP.planning.daily[d]) APP.planning.daily[d] = {};
+    if (!APP.planning.daily[d][eid]) APP.planning.daily[d][eid] = {};
+    if (APP.planning.daily[d][eid].included || d === day) {
+      APP.planning.daily[d][eid].frozen = newState;
+      _stampField('plan.' + d + '.' + eid + '.frozen');
+    }
+  });
   saveApp(); renderPlanDay(day);
-  toast(!cur ? '🔒 Équipement figé — ne sera pas modifié par la génération auto' : '📌 Équipement libéré');
+  toast(newState ? '🔒 Équipement figé sur toute la semaine' : '📌 Équipement libéré');
 }
 
 function saveRealisationPlan(day, eid, val) {
@@ -6275,13 +6316,12 @@ function saveRealisationPlan(day, eid, val) {
 }
 
 function autoGeneratePlanning() {
-  // ── GUARD : seul le Directeur Matériel génère le Top 10 ──────
-  // Le Chef d'Atelier reçoit le Top 10 via Firebase (_syncMerge)
-  // mais ne peut pas le recalculer lui-même (règle métier)
-  if (ROLE !== 'dm') {
-    toast('\u26d4 Seul le Directeur Mat\u00e9riel peut g\u00e9n\u00e9rer le Top 10.');
+  // ── V19: Chef d'Atelier génère le Top 10 (DM = planification, Chef = opérationnel) ──
+  if (ROLE === 'dm') {
+    toast('\u26d4 Le Chef d\'Atelier est responsable de la génération du Top 10.');
     return;
   }
+  _stampField('plan.generateTop10');
   _stampField('plan.generateTop10');  // timestamp pour propagation Firebase
   /*
    * ────────────────────────────────────────────────────────────────
@@ -6538,7 +6578,20 @@ function spf(day, eid, field, val) {
 }
 
 function renderBilan(c) {
-  var planned = getPlanned();
+  // A4b: conserver l'ordre d'apparition lundi→samedi (comme dans renderPlanDay)
+  var rawPlanned = getPlanned();
+  // Trier selon l'ordre d'apparition dans le planning semaine (lundi en premier)
+  var orderMap = {};
+  var dayOrder = ['lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+  dayOrder.forEach(function(d) {
+    var dayData = APP.planning.daily[d] || {};
+    Object.keys(dayData).forEach(function(eid) {
+      if (dayData[eid] && dayData[eid].included && orderMap[eid] === undefined) {
+        orderMap[eid] = Object.keys(orderMap).length;
+      }
+    });
+  });
+  var planned = rawPlanned.slice().sort(function(a,b){ return (orderMap[a]||0)-(orderMap[b]||0); });
   if (!planned.length) { c.innerHTML = '<div class="al ai">Aucun équipement planifié cette semaine.</div>'; return; }
   var bd = APP.planning.daily.vendredi || {};
   var h = '<div class="al ai mb2" style="font-size:11px;">Saisir le taux de réalisation pour chaque équipement. À 100%, le statut passe automatiquement à OK.</div>';
@@ -7277,12 +7330,10 @@ function filterEq() {
         '<td><span class="badge ' + (e.statut==='OK'?'bok':e.statut==='IMMOBILISE'?'bimmob':'bpanne') + '">' + e.statut + '</span>' + (e.standby ? '<span class="badge" style="background:#fef2f2;color:#dc2626;font-size:9px;margin-left:3px;">⏸</span>' : '') + '</td>' +
         '<td><span class="badge bgray" style="font-size:9px;">' + (e.pieces||'--') + '</span></td>' +
         '<td class="trunc ts" style="max-width:200px;">' +
-          (ROLE === 'dm'
-            ? '<input type="text" value="' + escH(e.desc||'') + '" onchange="(function(id,v){var _e=APP.equips.find(function(x){return x.id===id});if(_e){_e.desc=v;_stampField(\'equip.desc.\'+_e.code);saveApp();}})(\''+e.id+'\',this.value)" title="Modifier la description" style="width:100%;font-size:11px;padding:2px 5px;border:1px solid var(--g200);border-radius:4px;background:var(--b1);">'
-            : escH(e.desc||'--')) +
-          '</td>' +
-        '<td style="white-space:nowrap;">' +
+          '<input type="text" value="' + escH(e.desc||'') + '" onchange="saveEquipDesc(\'' + e.id + '\',this.value)" title="Description (priorité Chef)" style="width:100%;font-size:11px;padding:2px 5px;border:1px solid var(--g200);border-radius:4px;background:var(--b1);">' +
+          '</td>' +        '<td style="white-space:nowrap;">' +
           '<button class="btn sm" style="background:var(--b1);color:var(--b6);border:none;font-size:10px;" onclick="cycleStatus(\'' + e.id + '\')">Changer</button> ' +
+          '<button class="btn sm" style="background:#eff6ff;color:#1d4ed8;border:none;font-size:10px;" onclick="openEditEquip(\'' + e.id + '\')">✏ Modifier</button> ' +
           '<button class="btn bd sm" style="font-size:10px;" onclick="delEquip(\'' + e.id + '\')">Suppr.</button>' +
         '</td></tr>';
     });
@@ -7358,6 +7409,22 @@ function saveEquip() {
     priority: parseInt(document.getElementById('ne-pri').value)||2,
     pieces: 'Non disponible', checklist: []
   };
+  // B3 FIX: édition d'un équipement existant si _editEquipId défini
+  if (window._editEquipId) {
+    var _eIdx = APP.equips.findIndex(function(x){ return x.id === window._editEquipId; });
+    if (_eIdx > -1) {
+      var _ex = APP.equips[_eIdx];
+      _ex.famille = e.famille; _ex.type = e.type; _ex.immat = e.immat;
+      _ex.desc = e.desc; _ex.statut = e.statut; _ex.priority = e.priority;
+      _stampField('equip.' + _ex.code + '.desc'); _stampField('equip.' + _ex.code + '.statut');
+      window._editEquipId = null;
+      saveApp(); if (_fbApp && _fbDB) _fbWriteToCloud();
+      closeM('m-eq'); filterEq();
+      toast('\u2705 Équipement modifié : ' + _ex.code);
+      return;
+    }
+    window._editEquipId = null;
+  }
   APP.equips.push(e);
   APP.hist.unshift({ id:'h'+Date.now(), date:new Date().toISOString().split('T')[0], code:e.code, famille:e.famille, type:'ENTRETIEN', desc:'Entrée garage', statut:e.statut, realisation:0 });
   _stampField('equip.' + code + '.create');
@@ -7697,7 +7764,8 @@ function clearH() { ['hq','hfam','htype','hfrom','hto'].forEach(function(id){var
 // ============================================================
 function buildReportHTML(forPrint) {
   var logo = LOGO;
-  var comment = document.getElementById('rpt-comment') ? document.getElementById('rpt-comment').value : '';
+  // A2 FIX: lire le commentaire Chef depuis la textarea OU depuis APP.planning.rptComment
+  var comment = (document.getElementById('rpt-comment') ? document.getElementById('rpt-comment').value : '') || (APP.planning && APP.planning.rptComment) || '';
   var activeEq = _activeEquips();
   var tot = activeEq.length;
   var ok = activeEq.filter(function(e){return e.statut==='OK';}).length;
@@ -7763,14 +7831,23 @@ function buildReportHTML(forPrint) {
     var rowBg   = rPct>=100?'#f0fdf4':rPct>=75?'#f0fdf4':rPct>=50?'#fff7ed':rPct>=25?'#fefce8':'#f8fafc';
     var progBar = '<div style="display:flex;align-items:center;gap:4px;"><div style="flex:1;height:5px;background:#e2e8f0;border-radius:2px;"><div style="height:5px;width:'+rPct+'%;background:'+progColor+';border-radius:2px;"></div></div><strong style="font-size:9px;color:'+progColor+';">'+rPct+'%</strong></div>';
 
-    // Ligne équipement principale
-    var rows = '<tr style="background:'+rowBg+';border-left:3px solid '+progColor+';">' +
-      '<td style="padding:5px 6px;"><strong style="font-size:11px;color:#1e3a5f;">' + (idx+1) + '. ' + e.code + '</strong></td>' +
-      '<td style="font-size:9px;color:#64748b;">' + (e.famille||'—') + '</td>' +
-      '<td style="font-size:9px;max-width:160px;color:#374151;">' + (e.desc||'').substring(0,55) + '</td>' +
-      '<td>' + progBar + '</td>' +
-      '<td><span style="background:'+statBg+';padding:1px 6px;border-radius:6px;font-size:9px;font-weight:700;">'+e.statut+'</span></td>' +
-      '<td style="font-size:9px;color:#64748b;">' + (item.comment||'') + '</td>' +
+    // A2 FIX: Ligne équipement — fond coloré, gras, commentaire Chef visible
+    var chefComment = item.comment || '';
+    // Récupérer aussi le commentaire Chef de chaque jour (s'il existe)
+    var dayNames = ['lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+    if (!chefComment) {
+      dayNames.forEach(function(d) {
+        var dd = (APP.planning.daily[d] || {})[e.id] || {};
+        if (dd.commentaire && !chefComment) chefComment = dd.commentaire;
+      });
+    }
+    var rows = '<tr style="background:'+rowBg+';border-left:4px solid '+progColor+';">' +
+      '<td style="padding:5px 6px;background:'+rowBg+';"><strong style="font-size:11px;color:#1e3a5f;font-weight:800;">' + (idx+1) + '. ' + e.code + '</strong></td>' +
+      '<td style="font-size:9px;color:#374151;font-weight:700;background:'+rowBg+';">' + (e.famille||'—') + '</td>' +
+      '<td style="font-size:9px;max-width:160px;color:#374151;font-weight:700;background:'+rowBg+';">' + (e.desc||'').substring(0,55) + '</td>' +
+      '<td style="background:'+rowBg+'">' + progBar + '</td>' +
+      '<td style="background:'+rowBg+';"><span style="background:'+statBg+';padding:1px 6px;border-radius:6px;font-size:9px;font-weight:800;">'+e.statut+'</span></td>' +
+      '<td style="font-size:9px;color:#374151;font-style:italic;background:'+rowBg+';">' + (chefComment||'') + '</td>' +
     '</tr>';
 
     // Sous-lignes tâches hiérarchiques (A, B, C...)
@@ -7800,9 +7877,12 @@ function buildReportHTML(forPrint) {
       '<td><span style="background:' + (d.executed?'#dcfce7;color:#166634':'#fee2e2;color:#991b1b') + ';padding:1px 4px;border-radius:6px;font-size:8px;font-weight:700;">' + (d.executed?'EXECUTE':'EN COURS') + '</span></td></tr>';
   }).join('');
 
-  var urgRows = APP.urg.map(function(u){
-    return '<tr><td>' + u.ordre + '</td><td><strong>' + u.code + '</strong></td><td style="font-size:9px;">' + u.desc + '</td><td style="font-size:9px;">' + u.dateOuverture + '</td></tr>';
-  }).join('');
+  var urgRows = (APP.urg && APP.urg.length) ? APP.urg.map(function(u){
+    return '<tr><td style="font-weight:700;color:#1e3a5f;">' + (u.ordre||'—') + '</td>' +
+      '<td><strong style="color:#dc2626;">' + (u.code||'') + '</strong></td>' +
+      '<td style="font-size:9px;color:#374151;">' + (u.desc||'').substring(0,60) + '</td>' +
+      '<td style="font-size:9px;">' + (u.dateOuverture||'—') + '</td></tr>';
+  }).join('') : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;font-size:10px;padding:8px;">Aucune urgence en cours</td></tr>';
 
   // V8: Extra KPIs
   var tachesTotal = plannedWithReal.reduce(function(s,p){ return s+(p.suiviTaches?p.suiviTaches.length:0); }, 0);
@@ -8612,6 +8692,7 @@ var _dynPerms = null; // Cache local des permissions Firebase
 function _loadDynPermissions() {
   if (!_fbDB) return;
   console.log('Firebase: chargement des règles de priorité depuis atcdata/permissions...');
+  _loadAppConfig(); // Charger la config nom/signature depuis Firebase
   _fbDB.ref('atcdata/permissions').on('value', function(snap) {
     var p = snap.val();
     if (!p || !p.priorityRules) {
@@ -8765,8 +8846,8 @@ function renderJournal() {
   var h = '<div style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">' +
     '<div class="stitle" style="font-size:15px;">📔 Journal des Tâches — Registre Historique</div>' +
     '<div style="display:flex;gap:6px;">' +
-      (ROLE === 'dm' || ROLE === 'chef' ?
-        '<button onclick="printJournal()" class="btn bs sm" style="font-size:10px;">🖨 Imprimer / PDF</button>' : '') +
+      '<button onclick="exportJournalXLSX()" class="btn bs sm" style="font-size:10px;">📊 Export Excel</button>' +
+    '<button onclick="printJournal()" class="btn bs sm" style="font-size:10px;">🖨 Imprimer / PDF</button>' +
     '</div>' +
   '</div>' +
 
@@ -8875,6 +8956,7 @@ function renderJournal() {
   h += '<div style="overflow-x:auto;" id="journal-table-wrap">' +
     '<table style="width:100%;border-collapse:collapse;font-size:10px;" id="journal-table">' +
     '<thead><tr style="background:var(--b5);color:#fff;">' +
+      '<th style="padding:6px 5px;text-align:left;width:28px;">#</th>' +
       '<th style="padding:6px 5px;text-align:left;white-space:nowrap;">Code</th>' +
       '<th style="padding:6px 5px;text-align:left;">Famille</th>' +
       '<th style="padding:6px 5px;text-align:left;">Statut</th>' +
@@ -8915,6 +8997,7 @@ function renderJournal() {
     }
 
     h += '<tr style="background:'+rowBg+';border-bottom:1px solid var(--g100);">' +
+      '<td style="padding:5px;color:#94a3b8;font-size:9px;text-align:right;min-width:24px;">'+(filtered.indexOf(r)+1)+'</td>' +
       '<td style="padding:5px;font-weight:700;color:var(--b5);'+txtStyle+'">'+escH(r.code)+'</td>' +
       '<td style="padding:5px;'+txtStyle+'">'+escH(r.famille)+'</td>' +
       '<td style="padding:5px;"><span style="background:'+statBg+';padding:1px 5px;border-radius:5px;font-size:9px;font-weight:700;">'+escH(r.statut)+'</span></td>' +
@@ -9139,6 +9222,126 @@ function renderJournal() {
   root.innerHTML = h;
 }
 
+
+// ── saveEquipDesc (Chef + DM, priorité Chef) ────────────────────────────
+function saveEquipDesc(eid, val) {
+  var e = APP.equips.find(function(x){ return x.id === eid; });
+  if (!e) return;
+  e.desc = val;
+  _stampField('equip.desc.' + e.code);
+  saveApp();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
+}
+
+// ── openEditEquip: ouvre le formulaire pré-rempli ──────────────────────
+function openEditEquip(eid) {
+  var e = APP.equips.find(function(x){ return x.id === eid; });
+  if (!e) return;
+  // Pré-remplir le formulaire d'ajout équipement
+  var setVal = function(id, val) { var el = document.getElementById(id); if (el) el.value = val || ''; };
+  setVal('ne-code',     e.code    || '');
+  setVal('ne-famille',  e.famille || '');
+  setVal('ne-type',     e.type    || '');
+  setVal('ne-immat',    e.immat   || '');
+  setVal('ne-desc',     e.desc    || '');
+  setVal('ne-statut',   e.statut  || 'PANNE');
+  setVal('ne-pieces',   e.pieces  || '');
+  setVal('ne-priority', e.priority || '3');
+  // Stocker l'ID en cours d'édition
+  window._editEquipId = eid;
+  openM('m-eq');
+  // Adapter le titre du modal
+  var mTitle = document.querySelector('#m-eq .mt');
+  if (mTitle) mTitle.textContent = '✏ Modifier équipement — ' + e.code;
+}
+
+// ── saveEquip: gérer création ET modification ─────────────────────────
+// (patch sur la fonction existante — on la wrapping avec un check d'ID)
+var _origSaveEquip = typeof saveEquip === 'function' ? saveEquip : null;
+
+// ── exportJournalXLSX: export Excel du journal filtré ─────────────────
+function exportJournalXLSX() {
+  var rows = _getFilteredJournalRows();
+  if (!rows || !rows.length) { toast('Aucune donnée à exporter.'); return; }
+  // Générer CSV (fallback si xlsx.js absent)
+  var headers = ['#','Code','Famille','Statut','Date ouverture','Desc. panne','Type tâche','Desc. tâche','Agents RH','MTTR','Avancement','Date clôture'];
+  var csvLines = [headers.join('\t')];
+  rows.forEach(function(r, i) {
+    var openDate = r.openAt ? new Date(r.openAt).toLocaleDateString('fr-FR') : '—';
+    var closeDate = (r.done && r.doneAt) ? new Date(r.doneAt).toLocaleDateString('fr-FR') : '—';
+    var mttr = (r.done && r.doneAt && r.openAt && r.doneAt > r.openAt) ? Math.round((r.doneAt-r.openAt)/3600000)+'h' : '—';
+    var avance = r.done ? 'Clôturée' : r.isDeleted ? 'Supprimée' : 'En cours';
+    csvLines.push([i+1, r.code, r.famille, r.statut, openDate, r.panneDesc.substring(0,50), r.tacheType, r.tacheDesc.substring(0,60), r.rh, mttr, avance, closeDate].join('\t'));
+  });
+  var blob = new Blob([csvLines.join('\n')], { type: 'text/tab-separated-values;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = 'journal_taches_' + new Date().toISOString().slice(0,10) + '.xlsx';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('\u2705 Export Excel téléchargé (' + rows.length + ' lignes).');
+}
+
+// ── _getFilteredJournalRows: retourner les lignes filtrées du journal ──
+function _getFilteredJournalRows() {
+  var allRows = _buildJournalData();
+  var fCode   = (document.getElementById('jf-code')    || {}).value || '';
+  var fFam    = (document.getElementById('jf-famille') || {}).value || '';
+  var fType   = (document.getElementById('jf-type')    || {}).value || '';
+  var fRH     = (document.getElementById('jf-rh')      || {}).value || '';
+  var fStatut = (document.getElementById('jf-statut')  || {}).value || '';
+  var fPeriod = (document.getElementById('jf-period')  || {}).value || '';
+  var now = Date.now();
+  var periodMs = fPeriod ? parseInt(fPeriod) * 86400000 : 0;
+  return allRows.filter(function(r){
+    if (fCode   && r.code !== fCode) return false;
+    if (fFam    && r.famille !== fFam) return false;
+    if (fType   && r.tacheType !== fType) return false;
+    if (fRH     && r.rh.indexOf(fRH) === -1) return false;
+    if (fStatut === 'done'    && (!r.done || r.isDeleted))  return false;
+    if (fStatut === 'inprog'  && (r.done  || r.isDeleted))  return false;
+    if (fStatut === 'deleted' && !r.isDeleted)              return false;
+    if (periodMs && r.openAt && (now - r.openAt) > periodMs) return false;
+    return true;
+  });
+}
+
+// ── B2: App Config: saveAppConfig / loadAppConfig ──────────────────────
+var APP_CONFIG = { nomLogiciel: 'DM-PLANNING', version: '', signature: 'Asset Manager' };
+
+function saveAppConfig(field, val) {
+  APP_CONFIG[field] = val;
+  // Persister dans Firebase
+  if (_fbApp && _fbDB && _fbAuth && _fbAuth.currentUser) {
+    var payload = {}; payload[field] = val;
+    _fbDB.ref('app_settings/config').update(payload).then(function(){
+      _applyAppConfig(); // Mettre à jour la bannière
+      toast('\u2705 Configuration sauvegardée : ' + field + ' = ' + val);
+    }).catch(function(e){ toast('\u26d4 Erreur: ' + e.message); });
+  }
+}
+
+function _applyAppConfig() {
+  // Mettre à jour la bannière du topbar
+  var nameEl = document.getElementById('app-config-name');
+  if (nameEl) nameEl.textContent = APP_CONFIG.nomLogiciel || 'DM-PLANNING';
+  var sigEl = document.getElementById('app-config-sig');
+  if (sigEl) sigEl.textContent = APP_CONFIG.signature || 'Asset Manager';
+}
+
+function _loadAppConfig() {
+  if (!_fbDB) return;
+  _fbDB.ref('app_settings/config').once('value').then(function(snap){
+    var cfg = snap.val();
+    if (cfg) {
+      if (cfg.nomLogiciel) APP_CONFIG.nomLogiciel = cfg.nomLogiciel;
+      if (cfg.signature)   APP_CONFIG.signature   = cfg.signature;
+      if (cfg.version)     APP_CONFIG.version      = cfg.version;
+      _applyAppConfig();
+    }
+  }).catch(function(){});
+}
+
 // Init sync badge
 _syncSetStatus('inactive');
 updateWeekBadge();
@@ -9206,12 +9409,15 @@ function _fbWriteToCloud() {
         'urg':       _sanitizeObj(APP.urg       || []),   // Urgences
         'masterplan':_sanitizeObj(APP.masterplan|| {}),   // Master Planning
         'pw':        _sanitizeObj(APP.pw        || {}),   // Mots de passe
-        'priorityRules': _sanitizeObj(APP.priorityRules || {}),  // Règles de priorité
+        // priorityRules EXCLU du payload général — envoyé uniquement par DM (voir bloc DM ci-dessous)
         'masterplanLocked': APP.masterplanLocked || false
       };
       if (ROLE === 'dm') {
         update['masterplan']       = _sanitizeObj(APP.masterplan || {});
         update['masterplanLocked'] = APP.masterplanLocked || false;
+        update['priorityRules']    = _sanitizeObj(APP.priorityRules || {});  // DM uniquement
+        update['priorityRulesLocked']   = !!APP.priorityRulesLocked;
+        update['priorityRulesLockedAt'] = APP.priorityRulesLockedAt || null;
         update['dm_inst']          = _sanitizeObj(APP.dm  || []);
         update['urg']              = _sanitizeObj(APP.urg  || []);
         update['pw']               = _sanitizeObj(APP.pw   || {});
