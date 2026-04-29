@@ -1091,7 +1091,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v19.1';
+var APP_VERSION = 'v19.2';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -4205,9 +4205,10 @@ function showPage(pg) {
       document.getElementById('content').appendChild(dynEl);
     }
     // V7 FIX: always regenerate innerHTML to prevent blank page
-    if (pg === 'guide') dynEl.innerHTML = buildGuidePage();
-    else if (pg === 'suivi') { dynEl.innerHTML = buildSuiviPage(); initSuivi(); }
-    else dynEl.innerHTML = buildAdminPage();
+    if (pg === 'guide')   dynEl.innerHTML = buildGuidePage();
+    else if (pg === 'suivi')  { dynEl.innerHTML = buildSuiviPage(); initSuivi(); }
+    else if (pg === 'admin')  dynEl.innerHTML = buildAdminPage();
+    else if (pg === 'journal') { dynEl.innerHTML = '<div id="journal-root"></div>'; renderJournal(); }
     dynEl.classList.add('active');
   } else {
     var el = document.getElementById('page-' + pg);
@@ -5722,30 +5723,54 @@ function renderDash() {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } }, scales: { x: { ticks: { font: { size: 9 } } }, y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
   });
 
-  var h8 = APP.hist.slice().reverse().slice(0,8);
-  // ── Format date JJ-MM-AA ─────────────────────────────────
-  function fmtDateChart(d) {
-    if (!d) return '—';
-    var parts = String(d).split('-'); // YYYY-MM-DD
-    if (parts.length === 3) {
-      var yy = parts[0].slice(-2); // 2 derniers chiffres de l'année
-      return parts[2] + '-' + parts[1] + '-' + yy; // JJ-MM-AA
-    }
-    return d.substring(5); // fallback
-  }
-  var chartLabels  = h8.map(function(h) { return fmtDateChart(h.date); });
-  var chartData    = h8.map(function(h) { return h.realisation || 0; });
-  var chartBgColors = chartData.map(function(v) {
-    return v >= 75 ? 'rgba(16,185,129,.75)' : v >= 50 ? 'rgba(249,115,22,.75)' : 'rgba(239,68,68,.65)';
-  });
-  var chartBrColors = chartData.map(function(v) {
-    return v >= 75 ? '#059669' : v >= 50 ? '#ea580c' : '#dc2626';
-  });
+  // ── GRAPHIQUE TAUX DE RÉALISATION — Combiné Barres + Tendance ───────────
   (function() {
     var ctx = document.getElementById('chartR');
     if (!ctx) return;
-    // Détruire le chart précédent si il existe
-    if (ctx._chartInstance) { try { ctx._chartInstance.destroy(); } catch(e) {} }
+    if (ctx._chartInstance) { try { ctx._chartInstance.destroy(); } catch(e2) {} }
+
+    // Construire les 7 jours de la semaine courante (chronologique, sans répétition)
+    var wi = getWeekInfo();
+    var jours = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+    var joursLabels = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+    var daily = APP.planning.daily || {};
+
+    // Calculer le taux de réalisation réel par jour
+    // = moyenne des réalisations de tous les équipements planifiés ce jour-là
+    var chartData = jours.map(function(jour) {
+      var dayData = daily[jour] || {};
+      var ids = Object.keys(dayData).filter(function(id){ return dayData[id] && dayData[id].included; });
+      if (!ids.length) return null; // aucun équipement planifié ce jour = null
+      var sum = ids.reduce(function(s, id) {
+        var pct = dayData[id].realisation ? parseInt(dayData[id].realisation) : 0;
+        // Prendre le max entre le % planning et le % tâches
+        var taskPct = computeEquipPct(id);
+        return s + Math.max(pct, taskPct);
+      }, 0);
+      return Math.round(sum / ids.length);
+    });
+
+    // Construire les labels avec date (ex: "Lun 27/04")
+    var mondayDate = wi.mondayDate;
+    var chartLabels = jours.map(function(j, i) {
+      var d = new Date(mondayDate);
+      d.setDate(mondayDate.getDate() + i);
+      var dd = ('0'+d.getDate()).slice(-2), mm = ('0'+(d.getMonth()+1)).slice(-2);
+      return joursLabels[i] + ' ' + dd + '/' + mm;
+    });
+
+    // Série 2: moyenne mobile 3 jours pour la tendance
+    var tendance = chartData.map(function(v, i) {
+      var vals = chartData.slice(Math.max(0,i-1), Math.min(chartData.length, i+2)).filter(function(x){ return x !== null; });
+      return vals.length ? Math.round(vals.reduce(function(s,x){return s+x;},0)/vals.length) : null;
+    });
+
+    // Couleurs barres selon le taux
+    var barColors = chartData.map(function(v) {
+      if (v === null) return 'rgba(148,163,184,0.3)';
+      return v >= 75 ? '#34d399' : v >= 50 ? '#60a5fa' : v >= 25 ? '#fbbf24' : '#f87171';
+    });
+
     ctx._chartInstance = new Chart(ctx, {
       type: 'bar',
       data: {
@@ -5755,25 +5780,27 @@ function renderDash() {
             type: 'bar',
             label: 'Taux de réalisation',
             data: chartData,
-            backgroundColor: chartBgColors,
-            borderColor: chartBrColors,
-            borderWidth: 2,
+            backgroundColor: barColors,
+            borderColor: barColors.map(function(c){ return c.replace('0.3','1'); }),
+            borderWidth: 1,
             borderRadius: 4,
-            order: 2
+            order: 2,
+            skipNull: true
           },
           {
             type: 'line',
-            label: 'Tendance',
-            data: chartData,
+            label: 'Tendance (moy. mobile 3j)',
+            data: tendance,
             borderColor: '#1d4ed8',
             backgroundColor: 'transparent',
-            borderWidth: 2,
+            borderWidth: 2.5,
             pointBackgroundColor: '#1d4ed8',
             pointRadius: 4,
             pointHoverRadius: 6,
-            tension: 0.35,
+            tension: 0.4,
             fill: false,
-            order: 1
+            order: 1,
+            spanGaps: true
           }
         ]
       },
@@ -5782,39 +5809,43 @@ function renderDash() {
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { display: true, position: 'top', labels: { font: { size: 10 }, boxWidth: 12 } },
+          legend: {
+            display: true,
+            position: 'top',
+            labels: { font: { size: 10 }, boxWidth: 12, padding: 8 }
+          },
           tooltip: {
             callbacks: {
-              label: function(ctx) {
-                var val = ctx.parsed.y;
-                var emoji = val >= 75 ? '✅' : val >= 50 ? '⚠️' : '🔴';
-                return ' ' + emoji + ' ' + ctx.dataset.label + ' : ' + val + '%';
+              title: function(ctx2) {
+                return ctx2[0] ? ctx2[0].label : '';
               },
-              title: function(ctx) {
-                return '📅 Semaine du ' + (ctx[0] ? ctx[0].label : '');
+              label: function(ctx2) {
+                if (ctx2.parsed.y === null) return ctx2.dataset.label + ': Aucun équipement';
+                var emoji = ctx2.parsed.y >= 75 ? '✅' : ctx2.parsed.y >= 50 ? '🟡' : '🔴';
+                return ' ' + emoji + ' ' + ctx2.dataset.label + ' : ' + ctx2.parsed.y + '%';
               }
             }
           }
         },
         scales: {
           x: {
-            ticks: { font: { size: 9 }, maxRotation: 35 },
-            grid: { display: false }
+            grid: { display: false },
+            ticks: { font: { size: 9 }, maxRotation: 0 }
           },
           y: {
-            min: 0, max: 100,
+            min: 0,
+            max: 100,
             ticks: {
               font: { size: 9 },
               callback: function(v) { return v + '%'; },
               stepSize: 25
             },
-            grid: { color: 'rgba(0,0,0,.06)' }
+            grid: { color: 'rgba(0,0,0,0.05)' }
           }
         }
       }
     });
-  })();
-}
+  })();}
 
 // ============================================================
 // MASTER PLANNING
@@ -8655,6 +8686,282 @@ function _saveDynPermissions() {
 // JOURNAL DES TÂCHES — Module V19.0
 // Registre historique chronologique (lecture seule) de toutes les tâches
 // ══════════════════════════════════════════════════════════════════════════
+
+function _buildJournalData() {
+  // Collecter toutes les tâches de toutes les semaines de APP.suiviTaches
+  var rows = [];
+  var weeks = Object.keys(APP.suiviTaches || {}).sort().reverse();
+  weeks.forEach(function(wk) {
+    var weekData = APP.suiviTaches[wk] || {};
+    Object.keys(weekData).forEach(function(eid) {
+      var entry = weekData[eid];
+      var taches = Array.isArray(entry) ? entry : (entry && Array.isArray(entry.taches) ? entry.taches : []);
+      var deleted = entry && entry._deletedTaskIds ? entry._deletedTaskIds : [];
+      var eq = APP.equips.find(function(e){ return e.id === eid; }) || { code: eid, famille: '—', desc: '—', statut: '—' };
+      taches.forEach(function(t) {
+        var isDeleted = deleted.indexOf(t.id) !== -1;
+        var rhNames = (t.rh || []).map(function(aid){
+          var ag = APP.agents.find(function(a){ return a.id === aid; });
+          return ag ? agentCode(ag) : aid;
+        }).join('; ');
+        rows.push({
+          wk: wk, eid: eid, tid: t.id,
+          code: eq.code, famille: eq.famille || '—', statut: eq.statut || '—',
+          panneDesc: eq.desc || '—',
+          tacheType: t.nom || '—',
+          tacheDesc: t.desc || '—',
+          rh: rhNames || '—',
+          done: !!t.done,
+          doneAt:  t.doneAt  || null,
+          addedAt: t.addedAt || null,
+          openAt:  t.addedAt || null,  // openAt = addedAt (modifiable par Chef)
+          isDeleted: isDeleted
+        });
+      });
+    });
+  });
+  // Tri: plus récent en haut (addedAt desc)
+  rows.sort(function(a, b){ return (b.addedAt||0) - (a.addedAt||0); });
+  return rows;
+}
+
+function renderJournal() {
+  var root = document.getElementById('journal-root') || document.getElementById('page-journal');
+  if (!root) { root = document.createElement('div'); root.id='journal-root'; (document.getElementById('page-journal')||document.getElementById('content')).appendChild(root); }
+  if (!root) return;
+
+  var allRows = _buildJournalData();
+
+  // ── KPIs ─────────────────────────────────────────────────────────────────
+  var total    = allRows.length;
+  var done     = allRows.filter(function(r){ return r.done && !r.isDeleted; }).length;
+  var inProg   = allRows.filter(function(r){ return !r.done && !r.isDeleted; }).length;
+  var deleted  = allRows.filter(function(r){ return r.isDeleted; }).length;
+  // Temps moyen de clôture
+  var closedRows = allRows.filter(function(r){ return r.done && r.doneAt && r.openAt && !r.isDeleted && (r.doneAt - r.openAt) > 0; });
+  var avgClose = closedRows.length ? Math.round(closedRows.reduce(function(s,r){ return s+(r.doneAt-r.openAt); },0)/closedRows.length/3600000) : null;
+  // MTTR — Mean Time To Repair (par équipement: de la 1ère tâche ouverte à la dernière validée)
+  var eqGroups = {};
+  allRows.filter(function(r){ return !r.isDeleted && r.openAt; }).forEach(function(r){
+    if (!eqGroups[r.eid]) eqGroups[r.eid] = { opens:[], closes:[] };
+    eqGroups[r.eid].opens.push(r.openAt);
+    if (r.done && r.doneAt) eqGroups[r.eid].closes.push(r.doneAt);
+  });
+  var mttrValues = [];
+  Object.keys(eqGroups).forEach(function(eid){
+    var g = eqGroups[eid];
+    if (g.closes.length > 0) {
+      var tOpen  = Math.min.apply(null, g.opens);
+      var tClose = Math.max.apply(null, g.closes);
+      if (tClose > tOpen) mttrValues.push((tClose - tOpen)/3600000);
+    }
+  });
+  var mttr = mttrValues.length ? Math.round(mttrValues.reduce(function(s,v){return s+v;},0)/mttrValues.length) : null;
+  // Type le + fréquent
+  var typeCount = {};
+  allRows.filter(function(r){ return !r.isDeleted; }).forEach(function(r){ typeCount[r.tacheType] = (typeCount[r.tacheType]||0)+1; });
+  var topType = Object.keys(typeCount).sort(function(a,b){ return typeCount[b]-typeCount[a]; })[0] || '—';
+
+  var h = '<div style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">' +
+    '<div class="stitle" style="font-size:15px;">📔 Journal des Tâches — Registre Historique</div>' +
+    '<div style="display:flex;gap:6px;">' +
+      (ROLE === 'dm' || ROLE === 'chef' ?
+        '<button onclick="printJournal()" class="btn bs sm" style="font-size:10px;">🖨 Imprimer / PDF</button>' : '') +
+    '</div>' +
+  '</div>' +
+
+  // KPIs
+  '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
+    '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #3b82f6;"><div class="kv">' + total + '</div><div class="kl">Total</div></div>' +
+    '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #10b981;"><div class="kv">' + done + '</div><div class="kl">Clôturées</div></div>' +
+    '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #f97316;"><div class="kv">' + inProg + '</div><div class="kl">En cours</div></div>' +
+    '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #ef4444;"><div class="kv">' + deleted + '</div><div class="kl">Supprimées</div></div>' +
+    (avgClose!==null ? '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #8b5cf6;"><div class="kv">' + avgClose + 'h</div><div class="kl">Durée moy.</div></div>' : '') +
+    '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #ec4899;"><div class="kv" style="font-size:' + (mttr!==null?'13':'11') + 'px;">' + (mttr!==null ? mttr+'h' : '—') + '</div><div class="kl">MTTR moy.</div></div>' +
+    '<div class="kcard" style="flex:1;min-width:110px;border-left:4px solid #eab308;"><div class="kv" style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escH(topType)+'">' + escH(topType.substring(0,13)) + '</div><div class="kl">Type fréquent</div></div>' +
+  '</div>' +
+
+  // ── Filtres multicritères (AND) ─────────────────────────────────────────
+  '<div style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:10px;margin-bottom:10px;">' +
+    '<div style="font-size:10px;font-weight:700;color:var(--g600);margin-bottom:6px;">🔍 Filtres (sélection multicritère — tous les critères actifs s\'appliquent simultanément)</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;">' +
+      '<div style="display:flex;flex-direction:column;gap:2px;">' +
+        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Code équip.</label>' +
+        '<select id="jf-code" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:90px;">' +
+          '<option value="">Tous</option>' +
+          Array.from(new Set(allRows.map(function(r){return r.code;}))).sort().map(function(c){ return '<option value="'+escH(c)+'">'+ escH(c)+'</option>'; }).join('') +
+        '</select>' +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:2px;">' +
+        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Famille</label>' +
+        '<select id="jf-famille" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:90px;">' +
+          '<option value="">Toutes</option>' +
+          Array.from(new Set(allRows.map(function(r){return r.famille;}))).sort().map(function(f){ return '<option value="'+escH(f)+'">'+escH(f)+'</option>'; }).join('') +
+        '</select>' +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:2px;">' +
+        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Type tâche</label>' +
+        '<select id="jf-type" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:100px;">' +
+          '<option value="">Tous</option>' +
+          Object.keys(typeCount).sort().map(function(t){ return '<option value="'+escH(t)+'">'+escH(t)+'</option>'; }).join('') +
+        '</select>' +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:2px;">' +
+        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Agent RH</label>' +
+        '<select id="jf-rh" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:90px;">' +
+          '<option value="">Tous</option>' +
+          APP.agents.filter(function(a){return a.actif;}).map(function(a){ var c=agentCode(a); return '<option value="'+escH(c)+'">'+escH(c)+'</option>'; }).join('') +
+        '</select>' +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:2px;">' +
+        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Statut tâche</label>' +
+        '<select id="jf-statut" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:90px;">' +
+          '<option value="">Tous</option>' +
+          '<option value="done">✅ Clôturées</option>' +
+          '<option value="inprog">🔄 En cours</option>' +
+          '<option value="deleted">🗑 Supprimées</option>' +
+        '</select>' +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:2px;">' +
+        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Période</label>' +
+        '<select id="jf-period" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:100px;">' +
+          '<option value="">Toutes</option>' +
+          '<option value="7">7 derniers jours</option>' +
+          '<option value="30">30 derniers jours</option>' +
+          '<option value="90">3 derniers mois</option>' +
+        '</select>' +
+      '</div>' +
+      '<button onclick="document.querySelectorAll(\'#jf-code,#jf-famille,#jf-type,#jf-rh,#jf-statut,#jf-period\').forEach(function(s){s.value=\'\';});renderJournal();" class="btn bd sm" style="font-size:10px;margin-top:14px;">✕ Effacer</button>' +
+    '</div>' +
+  '</div>';
+
+  // Lire les filtres actifs
+  var fCode   = (document.getElementById('jf-code')    || {}).value || '';
+  var fFam    = (document.getElementById('jf-famille') || {}).value || '';
+  var fType   = (document.getElementById('jf-type')    || {}).value || '';
+  var fRH     = (document.getElementById('jf-rh')      || {}).value || '';
+  var fStatut = (document.getElementById('jf-statut')  || {}).value || '';
+  var fPeriod = (document.getElementById('jf-period')  || {}).value || '';
+  var now = Date.now();
+  var periodMs = fPeriod ? parseInt(fPeriod) * 86400000 : 0;
+
+  // Restaurer les valeurs des filtres après re-render
+  function restoreFilters() {
+    var vals = {code:fCode,famille:fFam,type:fType,rh:fRH,statut:fStatut,period:fPeriod};
+    Object.keys(vals).forEach(function(k){
+      var el = document.getElementById('jf-'+k);
+      if (el && vals[k]) el.value = vals[k];
+    });
+  }
+
+  var filtered = allRows.filter(function(r){
+    if (fCode   && r.code !== fCode) return false;
+    if (fFam    && r.famille !== fFam) return false;
+    if (fType   && r.tacheType !== fType) return false;
+    if (fRH     && r.rh.indexOf(fRH) === -1) return false;
+    if (fStatut === 'done'    && (!r.done || r.isDeleted))  return false;
+    if (fStatut === 'inprog'  && (r.done  || r.isDeleted))  return false;
+    if (fStatut === 'deleted' && !r.isDeleted)              return false;
+    if (periodMs && r.openAt && (now - r.openAt) > periodMs) return false;
+    return true;
+  });
+
+  var nbActive = [fCode,fFam,fType,fRH,fStatut,fPeriod].filter(Boolean).length;
+  if (nbActive) h += '<div style="font-size:10px;color:var(--b5);font-weight:700;margin-bottom:6px;">&#9445; ' + nbActive + ' filtre(s) actif(s) — ' + filtered.length + ' résultat(s) sur ' + total + '</div>';
+
+  if (!filtered.length) { root.innerHTML = h + '<div class="al ai">Aucune tâche pour ces critères.</div>'; setTimeout(restoreFilters,0); return; }
+
+  // ── Tableau ──────────────────────────────────────────────────────────────
+  h += '<div style="overflow-x:auto;" id="journal-table-wrap">' +
+    '<table style="width:100%;border-collapse:collapse;font-size:10px;" id="journal-table">' +
+    '<thead><tr style="background:var(--b5);color:#fff;">' +
+      '<th style="padding:6px 5px;text-align:left;white-space:nowrap;">Code</th>' +
+      '<th style="padding:6px 5px;text-align:left;">Famille</th>' +
+      '<th style="padding:6px 5px;text-align:left;">Statut</th>' +
+      '<th style="padding:6px 5px;text-align:left;min-width:100px;">Date ouverture ✏</th>' +
+      '<th style="padding:6px 5px;text-align:left;">Desc. panne</th>' +
+      '<th style="padding:6px 5px;text-align:left;">Type tâche</th>' +
+      '<th style="padding:6px 5px;text-align:left;">Desc. tâche</th>' +
+      '<th style="padding:6px 5px;text-align:left;">Agents RH</th>' +
+      '<th style="padding:6px 5px;text-align:left;">MTTR</th>' +
+      '<th style="padding:6px 5px;text-align:left;">Avancement</th>' +
+      '<th style="padding:6px 5px;text-align:left;">Date clôture</th>' +
+    '</tr></thead><tbody>';
+
+  filtered.forEach(function(r) {
+    var isDeleted = r.isDeleted, isDone = r.done && !isDeleted;
+    var rowBg = isDeleted ? '#fff0f0' : isDone ? '#f0fdf4' : '#fff';
+    var txtStyle = isDeleted ? 'text-decoration:line-through;color:#b91c1c;' : '';
+    var openDate = r.openAt ? new Date(r.openAt).toLocaleDateString('fr-FR') : '—';
+    var openDateVal = r.openAt ? new Date(r.openAt).toISOString().slice(0,10) : '';
+    var closeDate = (r.done && r.doneAt) ? new Date(r.doneAt).toLocaleDateString('fr-FR') : '—';
+    var statBg = r.statut==='OK' ? '#dcfce7;color:#166534' : '#fee2e2;color:#991b1b';
+    // MTTR pour cette tâche
+    var mttrCell = '—';
+    if (r.done && r.doneAt && r.openAt && r.doneAt > r.openAt) {
+      var hrs = Math.round((r.doneAt - r.openAt)/3600000);
+      mttrCell = hrs < 24 ? hrs + 'h' : Math.round(hrs/24) + 'j';
+    }
+
+    // Date ouverture éditable (Chef prioritaire)
+    var dateCell;
+    if (!isDeleted) {
+      dateCell = '<input type="date" value="' + escH(openDateVal) + '" ' +
+        'onchange="updateJournalOpenDate(\''+escH(r.wk)+'\',\''+escH(r.eid)+'\',\''+escH(r.tid)+'\',this.value)" ' +
+        'style="font-size:9px;border:1px solid var(--g200);border-radius:4px;padding:1px 4px;background:var(--g50);cursor:pointer;" ' +
+        'title="Cliquez pour modifier la date d\'ouverture (Chef prioritaire)">';
+    } else {
+      dateCell = escH(openDate);
+    }
+
+    h += '<tr style="background:'+rowBg+';border-bottom:1px solid var(--g100);">' +
+      '<td style="padding:5px;font-weight:700;color:var(--b5);'+txtStyle+'">'+escH(r.code)+'</td>' +
+      '<td style="padding:5px;'+txtStyle+'">'+escH(r.famille)+'</td>' +
+      '<td style="padding:5px;"><span style="background:'+statBg+';padding:1px 5px;border-radius:5px;font-size:9px;font-weight:700;">'+escH(r.statut)+'</span></td>' +
+      '<td style="padding:3px 5px;">'+dateCell+'</td>' +
+      '<td style="padding:5px;max-width:120px;'+txtStyle+'" title="'+escH(r.panneDesc)+'">'+escH(r.panneDesc.substring(0,35))+(r.panneDesc.length>35?'…':'')+'</td>' +
+      '<td style="padding:5px;'+txtStyle+'">'+escH(r.tacheType)+'</td>' +
+      '<td style="padding:5px;max-width:130px;'+txtStyle+'" title="'+escH(r.tacheDesc)+'">'+escH(r.tacheDesc.substring(0,40))+(r.tacheDesc.length>40?'…':'')+'</td>' +
+      '<td style="padding:5px;'+txtStyle+'">'+escH(r.rh)+'</td>' +
+      '<td style="padding:5px;font-weight:700;color:'+(mttrCell!=='—'?'#7c3aed':'#94a3b8')+';'+txtStyle+'">'+escH(mttrCell)+'</td>' +
+      '<td style="padding:5px;font-weight:700;color:'+(isDone?'#10b981':isDeleted?'#ef4444':'#f97316')+';'+txtStyle+'">'+(isDone?'✅ Clôturée':isDeleted?'🗑 Supprimée':'🔄 En cours')+'</td>' +
+      '<td style="padding:5px;color:#64748b;">'+escH(closeDate)+'</td>' +
+    '</tr>';
+  });
+  h += '</tbody></table></div>';
+  root.innerHTML = h;
+  setTimeout(restoreFilters, 0);
+}
+
+// ── Mettre à jour la date d'ouverture d'une tâche (Chef prioritaire) ──────
+function updateJournalOpenDate(wk, eid, tid, dateStr) {
+  if (!APP.suiviTaches || !APP.suiviTaches[wk] || !APP.suiviTaches[wk][eid]) return;
+  var entry = APP.suiviTaches[wk][eid];
+  var taches = Array.isArray(entry) ? entry : (entry.taches || []);
+  var t = taches.find(function(x){ return x.id === tid; });
+  if (!t) return;
+  var newTs = dateStr ? new Date(dateStr).getTime() : null;
+  if (!newTs || isNaN(newTs)) { toast('Date invalide.'); return; }
+  t.addedAt = newTs;
+  _stampField('suivi.openDate.' + eid + '.' + tid);
+  saveApp();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
+  toast('✅ Date ouverture mise à jour.');
+  setTimeout(renderJournal, 300);
+}
+
+// ── Impression PDF du journal ─────────────────────────────────────────────
+function printJournal() {
+  var tbl = document.getElementById('journal-table');
+  if (!tbl) { toast('Aucune donnée à imprimer.'); return; }
+  var styles = '<style>body{font-family:Arial,sans-serif;font-size:10px;} table{width:100%;border-collapse:collapse;} th{background:#1e3a5f;color:#fff;padding:6px;text-align:left;} td{padding:5px;border-bottom:1px solid #e2e8f0;} tr:nth-child(even){background:#f8fafc;} @media print{body{margin:0;}}</style>';
+  var title = '<h2 style="color:#1e3a5f;margin-bottom:8px;">📔 Journal des Tâches — DM-PLANNING</h2>' +
+    '<div style="font-size:10px;color:#64748b;margin-bottom:12px;">Édité le ' + new Date().toLocaleDateString('fr-FR', {weekday:'long',year:'numeric',month:'long',day:'numeric'}) + ' — SOSETER HYDRO Atelier Central Dakar</div>';
+  var win = window.open('', '_blank', 'width=1000,height=700');
+  win.document.write('<!DOCTYPE html><html><head><title>Journal des Tâches</title>' + styles + '</head><body>' + title + tbl.outerHTML + '</body></html>');
+  win.document.close();
+  setTimeout(function(){ win.print(); }, 400);
+}
 
 function _buildJournalData() {
   // Collecter toutes les tâches de toutes les semaines de APP.suiviTaches
