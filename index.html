@@ -928,6 +928,8 @@ textarea{resize:vertical;min-height:60px}
         <div class="ch"><span class="stitle" style="font-size:12px;margin:0;">Commentaire Chef d'Atelier</span></div>
         <div class="cb"><textarea id="rpt-comment" rows="3" placeholder="Observations, points d'attention, recommandations..."></textarea></div>
       </div>
+      <!-- Filtre lignes PDF — v20.0 -->
+      <div id="rpt-filter-wrap"></div>
       <div style="background:#fff;border:1px solid var(--g200);border-radius:10px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.07);">
         <div id="rpt-preview"></div>
       </div>
@@ -1368,12 +1370,23 @@ function _activeEquips() {
 }
 
 function saveApp() {
-  // Full Online v18.0 — Firebase est la SEULE source de vérité
+  // Full Online v20.0 — Firebase est la SEULE source de vérité
+  // File d'attente : si Firebase n'est pas encore prêt, retenter dans 2s (max 5 fois)
   if (!APP.fieldTs) APP.fieldTs = {};
   if (_fbApp && _fbDB && _fbAuth && _fbAuth.currentUser) {
     _fbWriteToCloud();
   } else {
-    console.warn('saveApp: Firebase indisponible — modification non persistée (mode hors-ligne).');
+    // Ne loguer qu'en debug pour ne pas polluer la console
+    console.debug('[saveApp] Firebase non prêt — écriture différée.');
+    if (!window._saveAppRetryCount) window._saveAppRetryCount = 0;
+    if (window._saveAppRetryCount < 5) {
+      window._saveAppRetryCount++;
+      clearTimeout(window._saveAppRetryTimer);
+      window._saveAppRetryTimer = setTimeout(function() {
+        window._saveAppRetryCount = 0;
+        saveApp();
+      }, 2000);
+    }
   }
 }
 
@@ -3963,6 +3976,11 @@ function _applyLogin(role, saveSession) {
       syncBtnDM.style.display = 'inline-flex';
       syncBtnDM.innerHTML = '\u21BA Sync Chef';
       syncBtnDM.title = 'Synchroniser manuellement avec les saisies du Chef d\'Atelier';
+      // ── RÈGLE D'OR : le DM utilise dmSyncChefData() et NON chefResetFromFirebase()
+      // chefResetFromFirebase() est réservé au Chef (remplacement total depuis DM).
+      // dmSyncChefData() fusionne UNIQUEMENT les données opérationnelles du Chef
+      // sans jamais toucher aux paramètres Gestion Base (priorityRules, etc.).
+      syncBtnDM.onclick = function() { dmSyncChefData(); };
     }
     ['sync-badge','db-badge','offline-badge'].forEach(function(id){
       var el=document.getElementById(id); if(el) el.style.display='none';
@@ -4964,7 +4982,7 @@ if (ROLE === 'dm') {
   '<div class="asect" style="margin-top:12px;">' +
     '<div class="astitle">&#9881; Identité du logiciel</div>' +
     '<div style="padding:12px;">' +
-      '<div style="font-size:10px;color:var(--g500);margin-bottom:10px;">Ces valeurs sont stockées dans Firebase (/app_settings/config) et s\'appliquent sur tous les postes.</div>' +
+      '<div style="font-size:10px;color:var(--g500);margin-bottom:10px;">Ces valeurs sont stockées dans Firebase (/atcdata/appConfig) et s\'appliquent sur tous les postes.</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:10px;">' +
         '<div style="flex:1;min-width:170px;">' +
           '<label style="font-size:10px;font-weight:700;">Nom du logiciel</label>' +
@@ -6555,25 +6573,77 @@ function autoGeneratePlanningIfEmpty() {
 }
 
 function tog(id) { var el = document.getElementById(id); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
+// ── JOURS DE TRAVAIL (lundi→samedi, dimanche exclu de la propagation) ────
+var PLAN_WORK_DAYS = ['lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+
+// ── v20.0 : PROPAGATION FORWARD ──────────────────────────────────────────
+// addPlan(day, eid) : ajoute l'équipement au jour N ET à tous les jours
+// suivants jusqu'au samedi. Le lundi antérieur n'est PAS modifié.
 function addPlan(day, eid) {
-  if (!APP.planning.daily[day]) APP.planning.daily[day] = {};
-  APP.planning.daily[day][eid] = { included: true, pieces: 'Disponible', heures: 8, agent: '', commentaire: '' };
-  _stampField('plan.' + day + '.' + eid + '.included');
-  saveApp(); renderPlanDay(day); toast('Ajouté au planning ' + day);
+  var startIdx = PLAN_WORK_DAYS.indexOf(day);
+  if (startIdx === -1) startIdx = 0;
+  var eq = APP.equips.find(function(x){ return x.id === eid; });
+  for (var i = startIdx; i < PLAN_WORK_DAYS.length; i++) {
+    var d = PLAN_WORK_DAYS[i];
+    if (!APP.planning.daily[d]) APP.planning.daily[d] = {};
+    if (!APP.planning.daily[d][eid] || !APP.planning.daily[d][eid].included) {
+      APP.planning.daily[d][eid] = {
+        included:    true,
+        pieces:      eq ? (eq.pieces || 'Non disponible') : 'Non disponible',
+        heures:      8,
+        agent:       '',
+        commentaire: '',
+        realisation: 0,
+        startDay:    day   // mémorise le jour de création pour le rapport
+      };
+      _stampField('plan.' + d + '.' + eid + '.included');
+    }
+  }
+  saveApp();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
+  renderPlanDay(day);
+  toast('✅ Ajouté au planning à partir de ' + day + ' → samedi.');
 }
+
+// removePlan(day, eid) : retire du jour N ET de tous les jours suivants.
+// Les jours antérieurs à N ne sont pas modifiés.
 function removePlan(day, eid) {
-  if (APP.planning.daily[day]) {
-    delete APP.planning.daily[day][eid];
-    _stampField('plan.' + day + '.' + eid + '.included');
+  var startIdx = PLAN_WORK_DAYS.indexOf(day);
+  if (startIdx === -1) startIdx = 0;
+  var entry = APP.planning.daily[day] && APP.planning.daily[day][eid];
+  if (entry && entry.frozen) { toast('🔒 Figé — déverrouillez d\'abord pour retirer.'); return; }
+  for (var i = startIdx; i < PLAN_WORK_DAYS.length; i++) {
+    var d = PLAN_WORK_DAYS[i];
+    if (APP.planning.daily[d] && APP.planning.daily[d][eid]) {
+      delete APP.planning.daily[d][eid];
+      _stampField('plan.' + d + '.' + eid + '.included');
+    }
   }
   saveApp(); renderPlanDay(day);
 }
+
+// spf(day, eid, field, val) : sauvegarde un champ ET propage aux jours
+// suivants (sauf commentaire qui est jour-spécifique).
+// Les jours antérieurs à day ne sont jamais modifiés.
 function spf(day, eid, field, val) {
+  var startIdx = PLAN_WORK_DAYS.indexOf(day);
+  // Toujours mettre à jour le jour courant
   if (!APP.planning.daily[day]) APP.planning.daily[day] = {};
   if (!APP.planning.daily[day][eid]) APP.planning.daily[day][eid] = { included: true };
   APP.planning.daily[day][eid][field] = val;
-  // Timestamp granulaire pour Smart Merge
   _stampField('plan.' + day + '.' + eid + '.' + field);
+  // Propager aux jours futurs pour les champs opérationnels clés
+  // (commentaire = notes du jour → pas propagé)
+  var propagateFields = ['realisation', 'pieces', 'agent', 'frozen', 'locked'];
+  if (propagateFields.indexOf(field) > -1 && startIdx > -1) {
+    for (var i = startIdx + 1; i < PLAN_WORK_DAYS.length; i++) {
+      var d = PLAN_WORK_DAYS[i];
+      if (APP.planning.daily[d] && APP.planning.daily[d][eid] && APP.planning.daily[d][eid].included) {
+        APP.planning.daily[d][eid][field] = val;
+        _stampField('plan.' + d + '.' + eid + '.' + field);
+      }
+    }
+  }
   saveApp();
 }
 
@@ -7888,9 +7958,14 @@ function buildReportHTML(forPrint) {
   var tachesTotal = plannedWithReal.reduce(function(s,p){ return s+(p.suiviTaches?p.suiviTaches.length:0); }, 0);
   var tachesDone = plannedWithReal.reduce(function(s,p){ return s+(p.suiviTaches?p.suiviTaches.filter(function(t){return t.done;}).length:0); }, 0);
 
+  // v20.0: filtre PDF — _rptExcludedIds = {id: true} pour les équipements masqués
+  var _excl = window._rptExcludedIds || {};
+
   return '<div class="ra">' +
     '<div class="rh"><img src="' + logo + '" alt="SOSETER HYDRO" class="rlogo"><div class="rtb"><div class="rwl">Rapport Hebdomadaire</div><div class="rp">' + weekLabel + '</div><div style="font-size:10px;color:var(--g400);margin-top:2px;">DM-PLANNING \u2014 Direction du Mat\u00E9riel \u2014 SOSETER HYDRO</div></div></div>' +
     '<div class="rbody">' +
+      // ── COMMENTAIRE CHEF EN TÊTE — avant les KPI (v20.0) ────────────────
+      (comment ? '<div class="rst" style="margin-top:0;">Commentaire Chef d\'Atelier</div><div class="rcmt" style="margin-bottom:12px;">' + comment + '</div>' : '') +
       '<div class="rkpis">' +
         '<div class="rkpi"><div class="rv">' + planned.length + '</div><div class="rl">Équip. Planifiés</div></div>' +
         '<div class="rkpi" style="border-top-color:' + tc + ';"><div class="rv" style="color:' + tc + ';">' + tauxGlobal + '%</div><div class="rl">Taux Realisation</div></div>' +
@@ -7902,17 +7977,55 @@ function buildReportHTML(forPrint) {
         '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:5px;padding:6px;text-align:center;"><span style="font-weight:700;">' + agents.length + '</span> agents actifs &mdash; <span style="font-weight:700;">' + cap + 'h</span>/sem.</div>' +
         '<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:5px;padding:6px;text-align:center;"><span style="font-weight:700;color:#92400e;">' + dmPend + '</span> inst. DM en attente</div>' +
       '</div>' +
-      '<div class="rst">Top 10 Équipements Planifiés — Avancement &amp; Tâches</div>' +
+      '<div class="rst">Top 10 Équipements Planifiés \u2014 Avancement &amp; Tâches</div>' +
       '<table class="rt"><thead><tr><th style="min-width:70px;">Code</th><th>Famille</th><th>Description</th><th>Réalisation</th><th>Statut</th><th>Commentaire</th></tr></thead><tbody>' +
-        (planRows || '<tr><td colspan="6" style="text-align:center;color:#94a3b8;font-style:italic;">Aucun équipement planifié pour cette semaine.</td></tr>') +
+        // ── Lignes filtrées selon _rptExcludedIds ─────────────────
+        (plannedWithReal.filter(function(item){ return !_excl[item.e.id]; }).map(function(item, idx){
+          var e = item.e, rPct = item.rPct;
+          var progColor = rPct>=100?'#10b981':rPct>=75?'#10b981':rPct>=50?'#f97316':rPct>=25?'#eab308':'#94a3b8';
+          var statBg  = e.statut==='OK'?'#dcfce7;color:#166534':'#fee2e2;color:#991b1b';
+          var rowBg   = rPct>=100?'#f0fdf4':rPct>=75?'#f0fdf4':rPct>=50?'#fff7ed':rPct>=25?'#fefce8':'#f8fafc';
+          var progBar = '<div style="display:flex;align-items:center;gap:4px;"><div style="flex:1;height:5px;background:#e2e8f0;border-radius:2px;"><div style="height:5px;width:'+rPct+'%;background:'+progColor+';border-radius:2px;"></div></div><strong style="font-size:9px;color:'+progColor+';">'+rPct+'%</strong></div>';
+          var chefComment = item.comment || '';
+          if (!chefComment) {
+            ['lundi','mardi','mercredi','jeudi','vendredi','samedi'].forEach(function(d) {
+              var dd = (APP.planning.daily[d] || {})[e.id] || {};
+              if (dd.commentaire && !chefComment) chefComment = dd.commentaire;
+            });
+          }
+          var rows = '<tr style="background:'+rowBg+';border-left:4px solid '+progColor+';">' +
+            '<td style="padding:5px 6px;background:'+rowBg+';"><strong style="font-size:11px;color:#1e3a5f;font-weight:800;">' + (idx+1) + '. ' + e.code + '</strong></td>' +
+            '<td style="font-size:9px;color:#374151;font-weight:700;background:'+rowBg+';">' + (e.famille||'\u2014') + '</td>' +
+            '<td style="font-size:9px;max-width:160px;color:#374151;font-weight:700;background:'+rowBg+';">' + (e.desc||'').substring(0,55) + '</td>' +
+            '<td style="background:'+rowBg+'">' + progBar + '</td>' +
+            '<td style="background:'+rowBg+';"><span style="background:'+statBg+';padding:1px 6px;border-radius:6px;font-size:9px;font-weight:800;">'+e.statut+'</span></td>' +
+            '<td style="font-size:9px;color:#374151;font-style:italic;background:'+rowBg+';">' + (chefComment||'') + '</td>' +
+          '</tr>';
+          var labels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+          (item.suiviTaches||[]).forEach(function(t, ti) {
+            var rhNames = (t.rh||[]).map(function(aid){
+              var a = APP.agents.find(function(x){ return x.id===aid; });
+              return a ? agentCode(a) : aid;
+            }).join('; ');
+            var doneStyle = t.done ? 'text-decoration:line-through;color:#9ca3af;' : '';
+            var doneBadge = t.done ? '<span style="color:#10b981;font-size:9px;">\u2713</span>' : '';
+            rows += '<tr style="background:'+(t.done?'#f9fafb':'#fff')+';border-left:3px solid '+(t.done?'#10b981':progColor)+';">' +
+              '<td style="padding:3px 6px 3px 22px;font-size:9px;color:'+progColor+';font-weight:800;">'+doneBadge+(labels[ti]||ti+1)+'</td>' +
+              '<td style="font-size:9px;color:#6b7280;">' + (t.nom||'\u2014') + '</td>' +
+              '<td style="font-size:9px;'+doneStyle+'">' + (t.desc||'\u2014').substring(0,60) + '</td>' +
+              '<td colspan="2" style="font-size:9px;color:#374151;">\ud83d\udc77 ' + (rhNames||'\u2014') + '</td>' +
+              '<td style="font-size:9px;font-weight:700;color:'+(t.done?'#10b981':'#f97316')+';">' + (t.done?'\u2705 Cl\u00f4tur\u00e9e':'\ud83d\udd04 En cours') + '</td>' +
+              '<td style="font-size:9px;color:#94a3b8;">' + ((t.done&&t.doneAt)?new Date(t.doneAt).toLocaleDateString('fr-FR'):'\u2014') + '</td>' +
+            '</tr>';
+          });
+          return rows;
+        }).join('') || '<tr><td colspan="6" style="text-align:center;color:#94a3b8;font-style:italic;">Aucun équipement planifié pour cette semaine.</td></tr>') +
       '</tbody></table>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
         '<div><div class="rst">Ressources Humaines</div><table class="rt"><thead><tr><th>Métier</th><th>Effectif</th><th>H/Sem.</th></tr></thead><tbody>' + agentRows + '<tr style="background:#0a1628;color:#fff;"><td><strong>TOTAL</strong></td><td><strong>' + agents.length + '</strong></td><td><strong>' + cap + 'h</strong></td></tr></tbody></table></div>' +
         '<div><div class="rst">Instructions DM</div><table class="rt"><thead><tr><th>Destinataire</th><th>Priorité</th><th>État</th></tr></thead><tbody>' + dmRows + '</tbody></table><div style="margin-top:5px;font-size:10px;color:var(--g600);">Total: <strong>' + APP.dm.length + '</strong> | Exécutées: <strong style="color:#10b981;">' + dmDone + '</strong> | En attente: <strong style="color:#ef4444;">' + dmPend + '</strong></div></div>' +
       '</div>' +
-      (comment ? '<div class="rst">Commentaires Chef d\'Atelier</div><div class="rcmt">' + comment + '</div>' : '') +
-      '<div class="rst">Urgences en Cours</div>' +
-      '<table class="rt"><thead><tr><th>#</th><th>Code</th><th>Description</th><th>Date</th></tr></thead><tbody>' + urgRows + '</tbody></table>' +
+      // Urgences en Cours : SUPPRIMÉ (v20.0)
     '</div>' +
     // ── BLOC STANDBY ────────────────────────────────────────────
     (function() {
@@ -7955,7 +8068,65 @@ function buildReportHTML(forPrint) {
   '</div>';
 }
 
+// ── v20.0 : filtre lignes PDF ─────────────────────────────────────────────
+// _rptExcludedIds = { equipId: true } — équipements à masquer du PDF
+window._rptExcludedIds = {};
+
+function _buildRptFilterUI() {
+  var wrap = document.getElementById('rpt-filter-wrap');
+  if (!wrap) return;
+  var top10Set  = APP.planning.top10ids || [];
+  var allIncl   = getPlanned();
+  var planned   = top10Set.slice();
+  allIncl.forEach(function(id){ if (planned.indexOf(id) === -1) planned.push(id); });
+  if (!planned.length) { wrap.innerHTML = ''; return; }
+
+  var html = '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:10px;">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">' +
+      '<span style="font-size:11px;font-weight:700;color:#1e3a5f;">🎛 Filtre PDF — Lignes à inclure</span>' +
+      '<div style="display:flex;gap:6px;">' +
+        '<button onclick="_rptFilterAll(true)"  class="btn bp sm" style="font-size:9px;padding:2px 9px;">Tout cocher</button>' +
+        '<button onclick="_rptFilterAll(false)" class="btn bd sm" style="font-size:9px;padding:2px 9px;">Tout décocher</button>' +
+      '</div>' +
+    '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:5px;">' +
+    planned.map(function(id) {
+      var e = APP.equips.find(function(eq){ return eq.id === id; });
+      if (!e) return '';
+      var isChecked = !window._rptExcludedIds[id];
+      var rPct = 0;
+      ['lundi','mardi','mercredi','jeudi','vendredi','samedi'].forEach(function(d) {
+        var dd = (APP.planning.daily[d] || {})[id] || {};
+        if (dd.realisation) rPct = Math.max(rPct, parseInt(dd.realisation)||0);
+      });
+      rPct = Math.max(rPct, computeEquipPct(id));
+      var col = rPct>=100?'#10b981':rPct>=50?'#f97316':rPct>0?'#eab308':'#94a3b8';
+      return '<label style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:3px 9px;font-size:10px;cursor:pointer;user-select:none;" ' +
+        'title="' + (e.type||'') + ' ' + (e.immat||'') + '">' +
+        '<input type="checkbox" ' + (isChecked?'checked':'') + ' onchange="window._rptExcludedIds[\'' + id + '\']=!this.checked; renderReport();" style="margin:0;accent-color:var(--b5);">' +
+        '<span style="font-weight:700;color:' + col + ';">' + e.code + '</span>' +
+        (rPct ? '<span style="font-size:9px;color:#94a3b8;">' + rPct + '%</span>' : '') +
+      '</label>';
+    }).join('') +
+    '</div></div>';
+  wrap.innerHTML = html;
+}
+
+function _rptFilterAll(include) {
+  window._rptExcludedIds = {};
+  if (!include) {
+    var top10Set = APP.planning.top10ids || [];
+    var allIncl  = getPlanned();
+    var planned  = top10Set.slice();
+    allIncl.forEach(function(id){ if (planned.indexOf(id) === -1) planned.push(id); });
+    planned.forEach(function(id){ window._rptExcludedIds[id] = true; });
+  }
+  _buildRptFilterUI();
+  renderReport();
+}
+
 function renderReport() {
+  _buildRptFilterUI();
   document.getElementById('rpt-preview').innerHTML = buildReportHTML(false);
 }
 
@@ -8481,6 +8652,14 @@ function confirmAddToPlanning() {
 // Résout les désync KPIs entre DM et Chef
 // ════════════════════════════════════════════════════════════════
 function chefResetFromFirebase() {
+  // ── GARDE SÉCURITÉ : Si le DM appelle cette fonction par accident
+  // (ex. : ancienne URL bookmarkée, appel console), rediriger vers
+  // dmSyncChefData() qui protège les paramètres Gestion Base.
+  if (ROLE === 'dm') {
+    console.warn('[SÉCURITÉ] chefResetFromFirebase() bloquée en profil DM → dmSyncChefData() utilisée à la place.');
+    dmSyncChefData();
+    return;
+  }
   if (!_fbReady || !_fbDB || !_fbAuth || !_fbAuth.currentUser) {
     toast('\u26d4 Non connect\u00e9 \u00e0 Firebase. V\u00e9rifiez votre connexion.');
     return;
@@ -8553,6 +8732,105 @@ function chefResetFromFirebase() {
     }, 300);
   }).catch(function(err) {
     toast('\u274c Erreur Firebase : ' + (err.message || err));
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// dmSyncChefData() — Sync Chef sécurisée pour le profil DM
+// ════════════════════════════════════════════════════════════════
+// RÈGLE D'OR : Cette fonction est l'UNIQUE point d'entrée du bouton
+// « ↺ Sync Chef » en profil DM.
+//
+// Périmètre de synchronisation : DONNÉES OPÉRATIONNELLES UNIQUEMENT
+//   ✅ Équipements, Planning, Agents, Instructions, Tâches, Historique
+//   ✅ Utilise _syncMerge() → respect strict des règles de priorité configurées
+//
+// Paramètres JAMAIS touchés (Gestion Base — propriété exclusive DM) :
+//   🔒 APP.priorityRules           — règles de priorité
+//   🔒 APP.priorityRulesLocked     — état verrouillé/déverrouillé
+//   🔒 APP.priorityRulesLockedAt   — horodatage du verrou
+//   🔒 APP.priorityRulesLockedBy   — auteur du verrou
+//   🔒 APP.tacheTypes              — types de tâches configurés
+//   🔒 APP.familles                — familles d'équipements
+//   🔒 APP.metiers                 — métiers configurés
+//   🔒 APP_CONFIG.*                — nom logiciel, version, signature, etc.
+//
+// NE PAS confondre avec chefResetFromFirebase() qui est réservé au Chef
+// (remplacement total toutes données depuis snapshot DM).
+// ════════════════════════════════════════════════════════════════
+function dmSyncChefData() {
+  if (ROLE !== 'dm') {
+    // Sécurité : si appelé hors profil DM, rediriger vers la fonction Chef
+    chefResetFromFirebase();
+    return;
+  }
+  if (!_fbReady || !_fbDB || !_fbAuth || !_fbAuth.currentUser) {
+    toast('\u26d4 Non connecté à Firebase. Vérifiez votre connexion.');
+    return;
+  }
+
+  toast('\u23f3 Synchronisation des données Chef en cours...');
+  console.log('[DM-SYNC] dmSyncChefData() — lecture Firebase, fusion opérationnelle uniquement.');
+
+  // ── Sauvegarder les paramètres Gestion Base AVANT toute opération ──────
+  // Ces valeurs sont immuables pendant cette opération.
+  var _savedPriorityRules      = APP.priorityRules
+                                   ? JSON.parse(JSON.stringify(APP.priorityRules))
+                                   : {};
+  var _savedPriorityRulesLocked    = !!APP.priorityRulesLocked;
+  var _savedPriorityRulesLockedAt  = APP.priorityRulesLockedAt  || null;
+  var _savedPriorityRulesLockedBy  = APP.priorityRulesLockedBy  || null;
+  var _savedTacheTypes             = APP.tacheTypes
+                                   ? APP.tacheTypes.slice()
+                                   : null;
+  var _savedFamilles               = APP.familles
+                                   ? APP.familles.slice()
+                                   : null;
+  var _savedMetiers                = APP.metiers
+                                   ? APP.metiers.slice()
+                                   : null;
+
+  _fbDB.ref('atcdata').once('value').then(function(snap) {
+    var remote = snap.val();
+    if (!remote || typeof remote !== 'object') {
+      toast('\u26d4 Aucune donnée trouvée dans Firebase.');
+      return;
+    }
+
+    // ── Fusion opérationnelle via Smart Merge ──────────────────────────
+    // _syncMerge() applique les règles de priorité configurées par le DM.
+    // Quand remote._by === 'chef', _syncMerge refuse DÉJÀ d'écraser les
+    // priorityRules (voir section 8 de _syncMerge). Ici on renforce cette
+    // protection en restaurant explicitement les valeurs sauvegardées.
+    var changed = _syncMerge(remote);
+
+    // ── RESTAURATION FORCÉE des paramètres Gestion Base ───────────────
+    // Garantie absolue : aucun chemin de _syncMerge ne peut altérer ces
+    // valeurs après cette restauration.
+    APP.priorityRules         = _savedPriorityRules;
+    APP.priorityRulesLocked   = _savedPriorityRulesLocked;
+    APP.priorityRulesLockedAt = _savedPriorityRulesLockedAt;
+    APP.priorityRulesLockedBy = _savedPriorityRulesLockedBy;
+    if (_savedTacheTypes !== null) APP.tacheTypes = _savedTacheTypes;
+    if (_savedFamilles   !== null) APP.familles   = _savedFamilles;
+    if (_savedMetiers    !== null) APP.metiers    = _savedMetiers;
+
+    // ── Persistance et rafraîchissement UI ────────────────────────────
+    saveApp();
+    autoRefreshUI();
+    console.log('[DM-SYNC] Sync Chef terminée — Gestion Base intacte. Changed:', changed);
+    toast('\u2705 Données Chef synchronisées.\nGestion Base (règles de priorité) préservée intégralement.');
+
+    setTimeout(function() {
+      autoRefreshUI();
+      try { renderDash(); }       catch(e) {}
+      try { if (typeof curPlanDay !== 'undefined') renderPlanDay(curPlanDay); } catch(e) {}
+      try { renderOrdList(); }    catch(e) {}
+    }, 300);
+
+  }).catch(function(err) {
+    toast('\u274c Erreur Firebase (Sync Chef) : ' + (err.message || err));
+    console.error('[DM-SYNC] Erreur:', err);
   });
 }
 
@@ -9314,7 +9592,7 @@ function saveAppConfig(field, val) {
   // Persister dans Firebase
   if (_fbApp && _fbDB && _fbAuth && _fbAuth.currentUser) {
     var payload = {}; payload[field] = val;
-    _fbDB.ref('app_settings/config').update(payload).then(function(){
+    _fbDB.ref('atcdata/appConfig').update(payload).then(function(){ // v20.0 FIX: /atcdata/appConfig (permissions)
       _applyAppConfig(); // Mettre à jour la bannière
       toast('\u2705 Configuration sauvegardée : ' + field + ' = ' + val);
     }).catch(function(e){ toast('\u26d4 Erreur: ' + e.message); });
@@ -9331,7 +9609,7 @@ function _applyAppConfig() {
 
 function _loadAppConfig() {
   if (!_fbDB) return;
-  _fbDB.ref('app_settings/config').once('value').then(function(snap){
+  _fbDB.ref('atcdata/appConfig').once('value').then(function(snap){ // v20.0 FIX: /atcdata/appConfig
     var cfg = snap.val();
     if (cfg) {
       if (cfg.nomLogiciel) APP_CONFIG.nomLogiciel = cfg.nomLogiciel;
@@ -9423,6 +9701,8 @@ function _fbWriteToCloud() {
         update['pw']               = _sanitizeObj(APP.pw   || {});
         update['priorityRules']    = _sanitizeObj(APP.priorityRules || {});
         update['tacheTypes']       = APP.tacheTypes || [];
+        // v20.0: appConfig inclus dans le payload DM (nœud /atcdata/appConfig)
+        update['appConfig']        = { nomLogiciel: APP_CONFIG.nomLogiciel||'DM-PLANNING', signature: APP_CONFIG.signature||'Asset Manager', version: APP_CONFIG.version||'' };
       }
       SYNC._fbLastWriteTs = ts;
       ref.update(update).then(function() {
