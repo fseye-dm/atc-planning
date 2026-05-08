@@ -933,7 +933,7 @@ textarea{resize:vertical;min-height:60px}
         </div>
       </div>
       <div class="card mb3">
-        <div class="ch"><span class="stitle" style="font-size:12px;margin:0;">Commentaire Chef d'Atelier</span></div>
+        <div class="ch"><span class="stitle" style="font-size:12px;margin:0;">Commentaire Chef d\'Atelier</span></div>
         <div class="cb"><textarea id="rpt-comment" rows="3" placeholder="Observations, points d'attention, recommandations..."></textarea></div>
       </div>
       <!-- Filtre lignes PDF — v20.0 -->
@@ -8438,12 +8438,12 @@ function buildReportHTML(forPrint) {
         '<tbody>' + rows + '</tbody></table>' +
         '</div>';
     })() +
-    // ── v20.4 : Commentaire Chef d'Atelier — section Navy en fin de rapport ──────
+    // ── v20.4 : Commentaire Chef d\'Atelier — section Navy en fin de rapport ──────
     (comment
       ? '<div style="margin-top:18px;border:2px solid #0A1F4E;border-radius:6px;overflow:hidden;page-break-inside:avoid;">' +
           '<div style="background:#0A1F4E;padding:9px 14px;display:flex;align-items:center;gap:10px;">' +
             '<span style="font-size:15px;">&#128203;</span>' +
-            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">Commentaire Chef d'Atelier</span>' +
+            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">Commentaire Chef d\'Atelier</span>' +
             '<span style="margin-left:auto;font-size:9px;color:#8fa8d8;white-space:nowrap;">Chef d\'Atelier \u2014 ' + new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'}) + '</span>' +
           '</div>' +
           '<div style="padding:12px 16px 14px;background:#f8fafc;font-size:11px;color:#1e293b;line-height:1.75;white-space:pre-wrap;border-left:4px solid #0A1F4E;font-style:italic;">' +
@@ -8456,7 +8456,7 @@ function buildReportHTML(forPrint) {
         '</div>'
       : '<div style="margin-top:18px;border:2px solid #0A1F4E;border-radius:6px;overflow:hidden;page-break-inside:avoid;">' +
           '<div style="background:#0A1F4E;padding:9px 14px;">' +
-            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">&#128203; Commentaire Chef d'Atelier</span>' +
+            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">&#128203; Commentaire Chef d\'Atelier</span>' +
           '</div>' +
           '<div style="padding:20px 16px;background:#f8fafc;font-size:10px;color:#94a3b8;text-align:center;font-style:italic;">' +
             'Aucun commentaire saisi \u2014 renseigner le champ &laquo;&nbsp;Commentaire Chef d\'Atelier&nbsp;&raquo; dans l\'onglet Rapport.' +
