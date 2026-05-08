@@ -101,7 +101,7 @@
 <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a1628'/%3E%3Ctext x='6' y='24' font-size='20' font-family='Arial' font-weight='bold' fill='%23f97316'%3EAT%3C/text%3E%3C/svg%3E">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DM-PLANNING v8 | Direction Matériel Planning — SOSETER HYDRO</title>
+<title>DM-PLANNING v20.1 | Direction Matériel Planning — SOSETER HYDRO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script type="text/javascript" src="https://me.kis.v2.scr.kaspersky-labs.com/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js?attr=VZK8tmkSIeCvoBTw__0-7eLIV39Ey2RpdjGjT3xMPIFwyIKAWP5UJad6DZSh5xIeAUeSD6CggVc7dHfLzAhXYw" charset="UTF-8"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
@@ -613,25 +613,33 @@ textarea{resize:vertical;min-height:60px}
 <!-- Firebase SDK : chargement dynamique séquentiel via _loadFirebaseSDK() -->
 <!-- Les scripts sont injectés par JavaScript avec onload/onerror garanti -->
 <!-- Cela évite la race condition entre les scripts statiques et _fbInit() -->
-<!-- Détection file:// instantanée — avant Firebase -->
+<!-- V20.2 — Détection file:// instantanée — alerte claire avant Firebase -->
 <script>
 (function(){
   if(location.protocol==='file:'){
-    document.addEventListener('DOMContentLoaded',function(){
+    setTimeout(function(){
       var el=document.getElementById('google-user-info');
       if(el){
         el.style.display='block';
-        el.style.background='#fef3c7';
-        el.style.border='1px solid #f59e0b';
-        el.style.color='#92400e';
-        el.innerHTML='<strong>⚠️ Ouvert en local (file://)</strong><br>'
-          +'Google Auth n\'est pas disponible hors ligne.<br>'
-          +'Utilisez la connexion par <strong>mot de passe</strong> ci-dessous.<br>'
-          +'<span style="font-size:10px;opacity:.8;">Chef : CHEF2026 &nbsp;|  DM : DM2026</span>';
+        el.style.background='#fef2f2';
+        el.style.border='2px solid #ef4444';
+        el.style.color='#991b1b';
+        el.style.borderRadius='8px';
+        el.style.padding='12px 14px';
+        el.innerHTML=
+          '<strong style="font-size:13px;">&#x26D4; Firebase ne peut pas fonctionner en local</strong><br><br>'+
+          'L\'application est ouverte depuis le disque (<code>file://</code>).<br>'+
+          'Google Auth <strong>n&eacute;cessite un serveur web</strong> (http:// ou https://).<br><br>'+
+          '<strong>Solutions&nbsp;:</strong><br>'+
+          '&bull; D&eacute;ployez sur <strong>GitHub Pages</strong> &mdash; URL&nbsp;: <code>https://fseye-dm.github.io/atc-planning/</code><br>'+
+          '&bull; Ou utilisez <strong>Live Server</strong> dans VS Code (clic droit sur index.html &rarr; Open with Live Server)<br><br>'+
+          '<strong>Connexion locale par mot de passe disponible ci-dessous&nbsp;:</strong><br>'+
+          '<span style="font-size:12px;background:#fff;padding:3px 8px;border-radius:4px;border:1px solid #fca5a5;">'+
+          'Chef&nbsp;: <code>CHEF2026</code>&nbsp;&nbsp;|&nbsp;&nbsp;DM&nbsp;: <code>DM2026</code></span>';
       }
       var btn=document.getElementById('btn-google');
-      if(btn){btn.disabled=true;btn.style.opacity='0.35';btn.style.cursor='not-allowed';}
-    });
+      if(btn){btn.disabled=true;btn.style.opacity='0.35';btn.style.cursor='not-allowed';btn.title='Déployez sur GitHub Pages pour utiliser Google Auth';}
+    },0);
   }
 })();
 </script>
@@ -1093,7 +1101,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v20.0';
+var APP_VERSION = 'v20.2';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1131,6 +1139,13 @@ var APP_CONFIG = {
 
 // Instances Firebase (initialisées par _fbInit)
 var _fbApp = null, _fbAuth = null, _fbDB = null, _fbListener = null, _fbWriteDebounce = null;
+
+// ══════════════════════════════════════════════════════════════════
+// SÉCURITÉ v21.0 — Verrou d'initialisation Firebase
+// Empêche toute écriture avant confirmation du chargement serveur
+// ══════════════════════════════════════════════════════════════════
+var isInitialLoadComplete = false;       // PILIER 1 : verrou écriture
+var _lastKnownEquipsCount  = -1;         // PILIER 3 : détection vidange accidentelle
 var _fbReady = false;  // true après initApp + auth
 var _fbInitRetries = 0; // compteur de tentatives de chargement Firebase
 
@@ -1370,13 +1385,23 @@ function _activeEquips() {
 }
 
 function saveApp() {
-  // Full Online v20.0 — Firebase est la SEULE source de vérité
-  // File d'attente : si Firebase n'est pas encore prêt, retenter dans 2s (max 5 fois)
+  // ── PILIER 1 : Verrou d'initialisation ─────────────────────────────────────
+  // Bloquer physiquement toute écriture tant que Firebase n'a pas confirmé
+  // la lecture initiale (même base vide). Évite l'écrasement au redémarrage.
+  if (!isInitialLoadComplete) {
+    // V20.2: Log unique — silencieux après la première occurrence
+    if (!saveApp._blockedLogged) {
+      saveApp._blockedLogged = true;
+      console.warn('[saveApp] BLOQUÉ — chargement initial Firebase non terminé. Les tentatives suivantes seront silencieuses.');
+    }
+    return;
+  }
+  saveApp._blockedLogged = false; // Réinitialiser pour la prochaine session
+  // Full Online v20.0 / Sécurité v21.0 — Firebase est la SEULE source de vérité
   if (!APP.fieldTs) APP.fieldTs = {};
   if (_fbApp && _fbDB && _fbAuth && _fbAuth.currentUser) {
     _fbWriteToCloud();
   } else {
-    // Ne loguer qu'en debug pour ne pas polluer la console
     console.debug('[saveApp] Firebase non prêt — écriture différée.');
     if (!window._saveAppRetryCount) window._saveAppRetryCount = 0;
     if (window._saveAppRetryCount < 5) {
@@ -2146,6 +2171,26 @@ function _fbShowInfo(msg, type) {
   info.innerHTML = msg;
 }
 
+// ══════════════════════════════════════════════════════════════════
+// PILIER 4 — Overlay de chargement sécurisé Firebase
+// Bloque l'interface tant que isInitialLoadComplete === false
+// ══════════════════════════════════════════════════════════════════
+function _showLoadingOverlay() {
+  var ov = document.getElementById('firebase-loading-overlay');
+  if (ov) ov.style.display = 'flex';
+}
+function _hideLoadingOverlay() {
+  var ov = document.getElementById('firebase-loading-overlay');
+  if (ov) {
+    ov.style.opacity = '0';
+    ov.style.transition = 'opacity 0.4s ease';
+    setTimeout(function() {
+      ov.style.display = 'none';
+      ov.style.opacity = '1'; // reset pour usage ultérieur éventuel
+    }, 420);
+  }
+}
+
 function _fbInit() {
   if (_fbApp) return;
 
@@ -2183,13 +2228,8 @@ function _fbInit() {
     return;
   }
 
-  // ── Afficher indicateur "Chargement..." si retour de redirect
-  var redirectPending = (localStorage.getItem(_FB_REDIRECT_KEY) === '1');
-  if (redirectPending) {
-    _fbShowInfo('⏳ Connexion Google en cours... veuillez patienter.', 'info');
-    var btn = document.getElementById('btn-google');
-    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
-  }
+  // V20.2: Nettoyer tout flag redirect obsolète au démarrage
+  try { localStorage.removeItem(_FB_REDIRECT_KEY); } catch(e) {}
 
   // ── Firebase SDK garanti chargé — appelé depuis _loadFirebaseSDK(callback)
   // Plus besoin de retry : onload a confirmé que les scripts sont prêts
@@ -2219,36 +2259,23 @@ function _fbInit() {
     // On tente chaque niveau de persistance et on proceed dans tous les cas.
     _fbReady = true; // marquer prêt AVANT le setPersistence (non bloquant)
 
+    // ── V20.2: Pure Popup — getRedirectResult supprimé (instable en desktop) ──
+    // onAuthStateChanged prend le relais dès que la session est restaurée.
     function _proceedAfterPersistence() {
-      // ── Récupérer le résultat d'un éventuel redirect Google ──
-      _fbAuth.getRedirectResult().then(function(result) {
-        try { localStorage.removeItem(_FB_REDIRECT_KEY); } catch(e) {}
-        var btn = document.getElementById('btn-google');
-        if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-        if (result && result.user) {
-          console.log('Firebase: redirect auth OK ->', result.user.email);
-          // onAuthStateChanged se déclenche automatiquement
-        } else if (redirectPending) {
-          _fbShowInfo(
-            '\u26a0\ufe0f Redirection Google non aboutie.<br>' +
-            '<strong>Solution :</strong> Edge → ··· → Param\u00e8tres → Confidentialit\u00e9 ' +
-            '→ Protection du suivi → choisir <strong>"De base"</strong> → Relancer la page.',
-            'warn'
-          );
-        }
-      }).catch(function(err) {
-        try { localStorage.removeItem(_FB_REDIRECT_KEY); } catch(e) {}
-        var btn = document.getElementById('btn-google');
-        if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-        console.warn('Firebase getRedirectResult:', err.code, err.message);
-        // On ne bloque pas — onAuthStateChanged gère la session
-      });
+      // Nettoyer le flag redirect obsolète s'il traîne
+      try { localStorage.removeItem(_FB_REDIRECT_KEY); } catch(e) {}
+      var btn = document.getElementById('btn-google');
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+      // onAuthStateChanged gère la session — rien d'autre à faire ici
+      console.log('Firebase: persistance configurée — en attente de onAuthStateChanged.');
     }
 
-    // Niveau 1 : LOCAL (localStorage — optimal)
-    _fbAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION)
+    // ── PILIER 2 : Persistance LOCAL (survit aux redémarrages et fermetures Chrome) ──
+    // LOCAL = données conservées dans localStorage → pas de reconnexion après F5 ou reboot.
+    // Cascade : LOCAL → SESSION → NONE si l'environnement bloque les niveaux supérieurs.
+    _fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
       .then(function() {
-        console.log('Firebase: persistance SESSION activée.');
+        console.log('Firebase: persistance LOCAL activée (survit aux redémarrages).');
         _proceedAfterPersistence();
       })
       .catch(function(e1) {
@@ -2328,6 +2355,10 @@ function _fbOnSignedIn(user) {
   }
 
   _fbReady = true;
+  // ── PILIER 4 : Afficher l'overlay de chargement sécurisé ────────────────────
+  // L'utilisateur est authentifié mais les données ne sont pas encore chargées.
+  // Bloquer l'interface jusqu'à confirmation du serveur.
+  _showLoadingOverlay();
   // ── Mémoriser l'email Google pour pré-remplissage au prochain login ──
   try { localStorage.setItem('_dm_saved_google_email', email); } catch(e) {}
   console.log('Firebase: authentifié en tant que [' + role + '] — ' + email);
@@ -2371,17 +2402,42 @@ function _fbOnSignedIn(user) {
     var remote = snap.val();
     if (remote && typeof remote === 'object') {
       var remTs = new Date(remote._ts || 0).toLocaleTimeString('fr-FR');
-      console.log('Firebase: donn\u00e9es charg\u00e9es depuis ' + (remote._by||'?') + ' (' + remTs + ')');
+      console.log('Firebase: données chargées depuis ' + (remote._by||'?') + ' (' + remTs + ')');
       try {
         _syncMerge(remote);
         _saveLocalOnly();
+        // ── PILIER 3 : Mémoriser le nombre d'équipements après chargement réel ──
+        _lastKnownEquipsCount = (APP.equips || []).filter(function(e){ return !e.deleted; }).length;
+        console.log('[Sécurité] Compteur équipements initialisé à : ' + _lastKnownEquipsCount);
         autoRefreshUI();
-      } catch(e) { console.error('Firebase merge d\u00e9marrage:', e); }
+      } catch(e) { console.error('Firebase merge démarrage:', e); }
     } else {
-      console.log('Firebase: base vide \u2014 initialisation avec donn\u00e9es locales');
+      // V20.2 FIX : snapshot null = base vide → lever le verrou quand même
+      console.log('Firebase: base vide — initialisation avec données locales');
+      _lastKnownEquipsCount = 0;
       _fbWriteToCloud();
     }
-  }).catch(function(e) { console.error('Firebase read:', e); });
+    // ── PILIER 1+4 : Déverrouiller les écritures + masquer l'overlay ─────────
+    isInitialLoadComplete = true;
+    console.log('[Sécurité] Verrou levé — isInitialLoadComplete = true. Écritures Firebase autorisées.');
+    _hideLoadingOverlay();
+  }).catch(function(e) {
+    console.error('Firebase read:', e);
+    // V20.2 : En cas d'erreur de lecture, afficher un message clair et lever le verrou
+    isInitialLoadComplete = true;
+    _hideLoadingOverlay();
+    // Afficher le message d'erreur dans le panneau de connexion si encore visible
+    var info = document.getElementById('google-user-info');
+    if (info) {
+      info.style.display = 'block';
+      info.style.background = '#fef2f2';
+      info.style.border = '1px solid #fca5a5';
+      info.style.color = '#991b1b';
+      info.innerHTML = '<strong>⚠ Erreur de lecture Firebase</strong><br>' +
+        'Code : <code>' + (e.code || e.message || 'inconnu') + '</code><br>' +
+        'Les données locales sont utilisées. Vérifiez votre connexion et rechargez (F5).';
+    }
+  });
 
   // ── Étape 3a : Indicateur connexion internet (online/offline) ──
   function _updateNetworkBadge() {
@@ -2435,68 +2491,79 @@ function _fbOnSignedIn(user) {
 
   // ── Listener onValue equips — sync miroir instantanée (Standby, statut) ──
   _fbDB.ref('atcdata/equips').on('value', function(snap) {
-    var remEquips = snap.val();
-    if (!remEquips || !Array.isArray(remEquips)) return;
-    var changed = false;
-    remEquips.forEach(function(re) {
-      if (!re || !re.id) return;
-      var le = APP.equips.find(function(e){ return e.id === re.id; });
-      if (!le) { if (!re.deleted) { APP.equips.push(re); changed = true; } }
-      else {
-        ['standby','statut','pieces','priority','desc','deleted'].forEach(function(f){
-          if (re[f] !== undefined && re[f] !== le[f]) { le[f] = re[f]; changed = true; }
-        });
+    // V20.1 MODULE 4: Bloquer si lecture initiale non terminée (anti-race)
+    if (!isInitialLoadComplete) return;
+    try {
+      var remEquips = snap.val();
+      if (!remEquips || !Array.isArray(remEquips)) return;
+      var changed = false;
+      remEquips.forEach(function(re) {
+        if (!re || !re.id) return;
+        var le = APP.equips.find(function(e){ return e.id === re.id; });
+        if (!le) { if (!re.deleted) { APP.equips.push(re); changed = true; } }
+        else {
+          ['standby','statut','pieces','priority','desc','deleted'].forEach(function(f){
+            if (re[f] !== undefined && re[f] !== le[f]) { le[f] = re[f]; changed = true; }
+          });
+        }
+      });
+      if (changed) {
+        console.log('Firebase equips: sync instantan\u00e9e — ' + remEquips.length + ' \u00e9quipements');
+        autoRefreshUI();
       }
-    });
-    if (changed) {
-      console.log('Firebase equips: sync instantan\u00e9e — ' + remEquips.length + ' \u00e9quipements');
-      autoRefreshUI();
-    }
+    } catch(e) { console.error('[V20.1] equips listener exception:', e); }
   }, function(err){ console.error('Firebase equips listener:', err.message); });
 
   // ── Listener onValue planning — Top10 + daily en temps réel ─────────────
   _fbDB.ref('atcdata/planning').on('value', function(snap) {
-    var rp = snap.val();
-    if (!rp) return;
-    var changed = false;
-    if (rp.top10ids && JSON.stringify(rp.top10ids) !== JSON.stringify(APP.planning.top10ids||[])) {
-      APP.planning.top10ids = rp.top10ids.slice(); changed = true;
-    }
-    if (rp.weekKey && rp.weekKey !== APP.planning.weekKey) {
-      APP.planning.weekKey = rp.weekKey; changed = true;
-    }
-    if (rp.daily) {
-      Object.keys(rp.daily).forEach(function(jour) {
-        if (!APP.planning.daily[jour]) APP.planning.daily[jour] = {};
-        Object.keys(rp.daily[jour]||{}).forEach(function(eid) {
-          var re = rp.daily[jour][eid];
-          if (re && JSON.stringify(APP.planning.daily[jour][eid]) !== JSON.stringify(re)) {
-            APP.planning.daily[jour][eid] = re; changed = true;
-          }
+    // V20.1 MODULE 4: Bloquer si lecture initiale non terminée (anti-race)
+    if (!isInitialLoadComplete) return;
+    try {
+      var rp = snap.val();
+      if (!rp) return;
+      var changed = false;
+      if (rp.top10ids && JSON.stringify(rp.top10ids) !== JSON.stringify(APP.planning.top10ids||[])) {
+        APP.planning.top10ids = rp.top10ids.slice(); changed = true;
+      }
+      if (rp.weekKey && rp.weekKey !== APP.planning.weekKey) {
+        APP.planning.weekKey = rp.weekKey; changed = true;
+      }
+      if (rp.daily) {
+        Object.keys(rp.daily).forEach(function(jour) {
+          if (!APP.planning.daily[jour]) APP.planning.daily[jour] = {};
+          Object.keys(rp.daily[jour]||{}).forEach(function(eid) {
+            var re = rp.daily[jour][eid];
+            if (re && JSON.stringify(APP.planning.daily[jour][eid]) !== JSON.stringify(re)) {
+              APP.planning.daily[jour][eid] = re; changed = true;
+            }
+          });
         });
-      });
-    }
-    if (changed) {
-      console.log('Firebase planning: mise \u00e0 jour Top10 + daily');
-      autoRefreshUI();
-    }
+      }
+      if (changed) {
+        console.log('Firebase planning: mise \u00e0 jour Top10 + daily');
+        autoRefreshUI();
+      }
+    } catch(e) { console.error('[V20.1] planning listener exception:', e); }
   }, function(err){ console.error('Firebase planning listener:', err.message); });
 
   // ── Listener onValue dm : Instructions DM en temps réel ─────────────────
   // Couvre les cas où le DM ajoute/modifie/supprime une instruction
   _fbDB.ref('atcdata/dm').on('value', function(snap) {
-    var remDm = snap.val();
-    if (!Array.isArray(remDm)) return;
-    if (JSON.stringify(APP.dm) !== JSON.stringify(remDm)) {
-      APP.dm = remDm;
-      console.log('Firebase dm: ' + remDm.length + ' instruction(s) synchronisée(s)');
-      // Rafraîchir le module Instructions DM si visible
-      try {
-        var pg = (document.getElementById('ptitle')||{}).textContent||'';
-        if (pg === 'Instructions DM') renderDMPage();
-        else autoRefreshUI();
-      } catch(e) {}
-    }
+    // V20.1 MODULE 4: Bloquer si lecture initiale non terminée (anti-race)
+    if (!isInitialLoadComplete) return;
+    try {
+      var remDm = snap.val();
+      if (!Array.isArray(remDm)) return;
+      if (JSON.stringify(APP.dm) !== JSON.stringify(remDm)) {
+        APP.dm = remDm;
+        console.log('Firebase dm: ' + remDm.length + ' instruction(s) synchronisée(s)');
+        try {
+          var pg = (document.getElementById('ptitle')||{}).textContent||'';
+          if (pg === 'Instructions DM') renderDMPage();
+          else autoRefreshUI();
+        } catch(e) {}
+      }
+    } catch(e) { console.error('[V20.1] dm listener exception:', e); }
   }, function(err){ console.error('Firebase dm listener:', err.message); });
 
 
@@ -2566,25 +2633,32 @@ function _fbOnSignedOut() {
 
 
 
-// Connexion Google — Popup (Chrome) avec fallback Redirect (Edge)
+// V20.2 — Connexion Google : PURE POPUP uniquement (signInWithRedirect supprimé)
+// signInWithRedirect cause auth/operation-not-supported-in-this-environment en desktop.
+// signInWithPopup est stable sur GitHub Pages (https) + Chrome/Edge/Firefox.
 function _fbSignIn() {
-  // Initialiser Firebase si pas encore fait
   if (!_fbApp) { _fbInit(); }
 
-  // Vérifier si l'app Firebase est initialisée (_fbApp = sync, pas _fbReady qui est async)
   if (!_fbApp || !_fbAuth) {
     _fbShowInfo('\u26a0 Firebase non initialisé — vérifiez votre connexion internet et rechargez la page.', 'warn');
-    var btn2 = document.getElementById('btn-google');
-    if (btn2) { btn2.style.borderColor = '#ef4444'; btn2.style.background = '#fef2f2'; }
     return;
   }
 
-  // Si Firebase est initialisé mais _fbReady pas encore true (setPersistence en cours)
-  // → on peut quand même lancer la connexion Google — le callback onAuthStateChanged gérera le reste
+  // Vérification protocole — popup impossible en file://
+  if (location.protocol === 'file:') {
+    _fbShowInfo(
+      '\u26D4 Impossible d\'utiliser Google Auth en local (file://).<br>' +
+      'Déployez sur <strong>GitHub Pages</strong> ou utilisez <strong>Live Server</strong>.<br>' +
+      '<span style="font-size:10px;color:#6b7280;">Connexion locale : Chef&nbsp;: CHEF2026 | DM&nbsp;: DM2026</span>',
+      'err'
+    );
+    return;
+  }
 
   var btn = document.getElementById('btn-google');
   if (btn) { btn.disabled = true; btn.style.opacity = '0.7'; }
-  // Pré-remplir l'email mémorisé (Google ou local)
+
+  // Pré-remplir l'email mémorisé
   try {
     var savedGEmail = localStorage.getItem('_dm_saved_google_email');
     if (savedGEmail && btn) {
@@ -2593,7 +2667,6 @@ function _fbSignIn() {
       var changeLink = document.getElementById('change-google-account');
       if (changeLink) changeLink.style.display = 'inline';
     }
-    // Pré-remplir email local mémorisé
     var savedLEmail = localStorage.getItem('_dm_saved_local_email');
     var emailInp = document.getElementById('lemail');
     if (savedLEmail && emailInp) emailInp.value = savedLEmail;
@@ -2602,95 +2675,43 @@ function _fbSignIn() {
   var provider = new firebase.auth.GoogleAuthProvider();
   provider.addScope('email');
   provider.addScope('profile');
-  provider.setCustomParameters({
-    prompt:    'select_account',
-    client_id: FIREBASE_CONFIG.clientId || ''
-  });
+  provider.setCustomParameters({ prompt: 'select_account' });
 
-  // ── Stratégie : Popup d'abord (instantané) → fallback Redirect si bloqué
-  // COOP fix: popup avec fallback redirect si Cross-Origin-Opener-Policy bloque
-  var _popupPromise = _fbAuth.signInWithPopup(provider);
-  _popupPromise.catch(function(err) {
-    if (err && (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user' ||
-        (err.message && err.message.indexOf('Cross-Origin') > -1))) {
-      console.log('Popup bloqué (COOP) → fallback redirect');
-      _fbAuth.signInWithRedirect(provider);
-    }
-  });
-  _popupPromise.then(function(result) {
-    // Popup réussie (Chrome, Firefox, Edge sans protection stricte)
+  _fbAuth.signInWithPopup(provider).then(function(result) {
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-    console.log('Firebase: popup auth OK');
+    console.log('Firebase: popup auth OK — ' + (result.user ? result.user.email : '?'));
     // onAuthStateChanged se déclenche automatiquement
 
-  }).catch(function(popupErr) {
-    console.warn('Firebase popup bloqué (' + popupErr.code + ') → bascule sur redirect');
+  }).catch(function(err) {
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+    console.warn('Firebase popup erreur (' + err.code + '):', err.message);
 
-    // Codes qui indiquent que le popup a été bloqué (pas une erreur utilisateur)
-    var popupBlocked = [
-      'auth/popup-blocked',
-      'auth/popup-closed-by-user',
-      'auth/cancelled-popup-request',
-      'auth/internal-error'
-    ];
-
-    if (popupBlocked.indexOf(popupErr.code) !== -1 || popupErr.code === undefined) {
-      // Basculer vers signInWithRedirect
-      if (btn) {
-        btn.disabled = true;
-        btn.style.opacity = '0.7';
-        var lbl=document.getElementById('btn-google-label'); if(lbl) lbl.textContent='⏳ Redirection Google...';
-      }
-      _fbShowInfo('⏳ Redirection vers Google... la page va se recharger.', 'info');
-
-      // Poser le flag avant la redirection (localStorage survit au rechargement)
-      try { localStorage.setItem(_FB_REDIRECT_KEY, '1'); } catch(e) {}
-
-      _fbAuth.signInWithRedirect(provider).catch(function(redirErr) {
-        try { localStorage.removeItem(_FB_REDIRECT_KEY); } catch(e) {}
-        if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-
-        if (redirErr.code === 'auth/web-storage-unsupported') {
-          _fbShowInfo(
-            '⛔ Stockage bloqué par Edge.<br>' +
-            '<strong>Solution :</strong> Edge → Paramètres → Confidentialité → Protection du suivi → choisir "De base".<br>' +
-            'Puis revenez sur l\'application.',
-            'err'
-          );
-        } else {
-          _fbShowInfo('❌ Erreur redirection (' + redirErr.code + ') : ' + redirErr.message, 'err');
-        }
-      });
-
-    } else if (popupErr.code === 'auth/unauthorized-domain') {
-      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-      _fbShowInfo(
-        '⛔ Domaine non autorisé : <strong>' + location.hostname + '</strong><br>' +
-        'console.firebase.google.com → Authentication → Settings → Domaines autorisés → Ajouter : <strong>' + location.hostname + '</strong>',
-        'err'
-      );
-    } else if (popupErr.code === 'auth/operation-not-allowed') {
-      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-      _fbShowInfo(
-        '⛔ Connexion Google non activée dans Firebase.<br>' +
-        'console.firebase.google.com → Authentication → Sign-in method → Google → Activer.',
-        'err'
-      );
-    } else {
-      if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
-      // Erreur générique ou auth/operation-not-supported-in-this-environment
-      if (popupErr.code === 'auth/operation-not-supported-in-this-environment') {
-        _fbShowInfo(
-          '\u26D4 Google Auth ne fonctionne pas dans cet environnement.<br>' +
-          'Assurez-vous d\'ouvrir l\'application via <strong>https://fseye-dm.github.io/atc-planning/</strong><br>' +
-          'et non depuis un fichier local (file://).<br>' +
-          '<span style="font-size:10px;color:#6b7280;">Connexion locale disponible ci-dessous — Chef : CHEF2026 | DM : DM2026</span>',
-          'err'
-        );
-      } else {
-        _fbShowInfo('\u274C Erreur connexion (' + popupErr.code + ') : ' + popupErr.message, 'err');
-      }
-    }
+    // Messages d'erreur adaptés à chaque code
+    var msgs = {
+      'auth/popup-closed-by-user':
+        '<span style="color:#92400e;">&#9888; Fenêtre fermée avant connexion. Cliquez à nouveau sur "Se connecter avec Google".</span>',
+      'auth/popup-blocked':
+        '\u26D4 Popup bloquée par le navigateur.<br>' +
+        '<strong>Solution :</strong> autorisez les popups pour ce site dans les paramètres du navigateur, puis réessayez.',
+      'auth/cancelled-popup-request':
+        '<span style="color:#92400e;">&#9888; Requête annulée (double-clic détecté). Réessayez une seule fois.</span>',
+      'auth/unauthorized-domain':
+        '\u26D4 Domaine non autorisé : <strong>' + location.hostname + '</strong><br>' +
+        'Firebase Console → Authentication → Settings → Domaines autorisés → Ajouter <strong>' + location.hostname + '</strong>.',
+      'auth/operation-not-allowed':
+        '\u26D4 Connexion Google non activée dans Firebase.<br>' +
+        'Firebase Console → Authentication → Sign-in method → Google → Activer.',
+      'auth/operation-not-supported-in-this-environment':
+        '\u26D4 Google Auth ne fonctionne pas dans cet environnement.<br>' +
+        'Ouvrez l\'application via <strong>https://fseye-dm.github.io/atc-planning/</strong> (pas en file://).<br>' +
+        '<span style="font-size:10px;color:#6b7280;">Connexion locale disponible : Chef&nbsp;: CHEF2026 | DM&nbsp;: DM2026</span>',
+      'auth/network-request-failed':
+        '\u26D4 Erreur réseau. Vérifiez votre connexion internet et réessayez.'
+    };
+    var msg = msgs[err.code] ||
+      ('\u274C Erreur connexion (<code>' + (err.code||'?') + '</code>) : ' + (err.message||'') + '<br>' +
+       '<span style="font-size:10px;color:#6b7280;">Utilisez la connexion par mot de passe si le problème persiste.</span>');
+    _fbShowInfo(msg, 'err');
   });
 }
 
@@ -3240,15 +3261,28 @@ function _initAutoBackup() {
   _backupCounter = cfg.counter || 0;
   _lastBackupDate = cfg.lastDate || null;
 
-  // Tenter de restaurer le handle du dossier backup depuis IDB
+  // V20.1: Tenter de restaurer le handle du dossier backup depuis IDB
   _idbGet('dm_backup_dir_handle', function(handle) {
-    if (handle) {
-      handle.queryPermission({ mode: 'readwrite' }).then(function(perm) {
-        if (perm === 'granted') {
-          _backupDirHandle = handle;
+    if (!handle) return;
+    handle.queryPermission({ mode: 'readwrite' }).then(function(perm) {
+      if (perm === 'granted') {
+        _backupDirHandle = handle;
+        console.log('[Backup] Dossier restauré depuis IndexedDB — permission OK');
+      } else {
+        // Permission perdue après redémarrage navigateur
+        // Si c'est mercredi entre 12h-17h → notification urgente
+        var now2 = new Date();
+        var isWed = (now2.getDay() === 3 && now2.getHours() >= 12 && now2.getHours() < 17);
+        _backupDirHandle = handle; // Garder le handle pour tenter requestPermission
+        if (isWed) {
+          _showBackupPermissionBanner(handle.name || 'dossier backup');
+        } else {
+          console.log('[Backup] Handle restauré mais permission non accordée (pas mercredi) — sera demandé mercredi.');
         }
-      }).catch(function(){});
-    }
+      }
+    }).catch(function(e) {
+      console.warn('[Backup] queryPermission erreur:', e.message || e);
+    });
   });
 
   // Démarrer le timer de vérification (toutes les 15 minutes)
@@ -3258,32 +3292,115 @@ function _initAutoBackup() {
   setTimeout(_checkAutoBackup, 5000);
 }
 
+// V20.1: Notification de re-autorisation dossier backup (mercredi)
+function _showBackupPermissionBanner(folderName) {
+  var existing = document.getElementById('backup-perm-banner');
+  if (existing) return;
+  var banner = document.createElement('div');
+  banner.id = 'backup-perm-banner';
+  banner.style.cssText = [
+    'position:fixed;top:50px;left:0;right:0;z-index:400;',
+    'background:linear-gradient(90deg,#fef3c7,#fffbeb);',
+    'border-bottom:3px solid #f59e0b;',
+    'padding:9px 18px;display:flex;align-items:center;gap:12px;',
+    'font-size:12px;color:#92400e;box-shadow:0 2px 8px rgba(0,0,0,.12);'
+  ].join('');
+  banner.innerHTML = [
+    '<span style="font-size:18px;">💾</span>',
+    '<div>',
+      '<strong>Sauvegarde automatique — Re-autorisation requise</strong>',
+      '<br><span style="font-size:11px;opacity:.8;">Dossier : <code>' + (folderName || 'backup') + '</code>',
+      ' — C\'est mercredi, la sauvegarde auto doit s\'exécuter aujourd\'hui.</span>',
+    '</div>',
+    '<button onclick="_backupRequestPermission()" style="margin-left:auto;padding:6px 16px;background:#f59e0b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;white-space:nowrap;box-shadow:0 2px 4px rgba(0,0,0,.2);">',
+      '🔓 Autoriser le dossier</button>',
+    '<button onclick="this.parentElement.remove()" style="padding:5px 10px;background:transparent;border:1px solid #f59e0b;border-radius:5px;cursor:pointer;color:#92400e;font-size:11px;white-space:nowrap;">',
+      'Ignorer</button>'
+  ].join('');
+  // Insérer dans #main après login
+  var main = document.getElementById('main');
+  if (main && main.style.display !== 'none') {
+    main.insertBefore(banner, main.firstChild);
+  } else {
+    setTimeout(function() {
+      var m2 = document.getElementById('main');
+      if (m2) m2.insertBefore(banner, m2.firstChild);
+      else document.body.appendChild(banner);
+    }, 1500);
+  }
+}
+
+// V20.1: Demander la permission sur le handle existant (sans changer de dossier)
+function _backupRequestPermission() {
+  if (!_backupDirHandle) { configureBackupFolder(); return; }
+  _backupDirHandle.requestPermission({ mode: 'readwrite' }).then(function(perm) {
+    var banner = document.getElementById('backup-perm-banner');
+    if (banner) banner.remove();
+    if (perm === 'granted') {
+      toast('✅ Permission dossier backup accordée — sauvegarde en cours...');
+      setTimeout(function() {
+        _runAutoBackup(function(ok, msg) {
+          if (ok) {
+            _lastBackupDate = new Date().toDateString();
+            var cfg = _loadBackupConfig();
+            cfg.lastDate = _lastBackupDate;
+            cfg.counter = _backupCounter;
+            _saveBackupConfig(cfg);
+            toast('✅ Sauvegarde auto effectuée : ' + msg);
+          } else {
+            toast('❌ Erreur sauvegarde : ' + msg);
+          }
+        });
+      }, 500);
+    } else {
+      toast('⚠️ Permission refusée. La sauvegarde automatique ne pourra pas s\'exécuter.');
+    }
+  }).catch(function(e) {
+    toast('❌ Erreur : ' + (e.message || e));
+  });
+}
+
 // Vérifier si la sauvegarde doit se déclencher
 function _checkAutoBackup() {
   if (ROLE !== 'dm') return;
   var cfg = _loadBackupConfig();
   if (!cfg.enabled) return;
-  if (!_backupDirHandle) return;
 
   var now   = new Date();
   var day   = now.getDay();        // 3 = mercredi
   var hour  = now.getHours();
   var today = now.toDateString();
 
-  // Condition : mercredi, entre 12h et 17h, pas encore fait aujourd'hui
+  // Si mercredi 12h-17h et pas encore fait aujourd'hui
   if (day === 3 && hour >= 12 && hour < 17 && today !== _lastBackupDate) {
-    _runAutoBackup(function(ok, msg) {
-      if (ok) {
-        _lastBackupDate = today;
-        var newCfg = _loadBackupConfig();
-        newCfg.lastDate = today;
-        newCfg.counter  = _backupCounter;
-        _saveBackupConfig(newCfg);
-        toast('\u2705 Sauvegarde automatique effectuée :\n' + msg);
-      } else {
-        // Réessayer dans 60 min si erreur (reste dans la plage 12h-17h)
-        toast('\u26A0 Sauvegarde auto échouée : ' + msg + '\nRéessai à la prochaine vérification.');
+    if (!_backupDirHandle) {
+      // V20.1: Pas de dossier → notifier l'utilisateur
+      if (!document.getElementById('backup-perm-banner')) {
+        _showBackupPermissionBanner('(aucun dossier configuré)');
       }
+      return;
+    }
+    // Vérifier la permission avant de tenter la sauvegarde
+    _backupDirHandle.queryPermission({ mode: 'readwrite' }).then(function(perm) {
+      if (perm !== 'granted') {
+        // Permission perdue → afficher banner
+        _showBackupPermissionBanner(_backupDirHandle.name || 'dossier backup');
+        return;
+      }
+      _runAutoBackup(function(ok, msg) {
+        if (ok) {
+          _lastBackupDate = today;
+          var newCfg = _loadBackupConfig();
+          newCfg.lastDate = today;
+          newCfg.counter  = _backupCounter;
+          _saveBackupConfig(newCfg);
+          toast('\u2705 Sauvegarde automatique effectuée :\n' + msg);
+        } else {
+          toast('\u26A0 Sauvegarde auto échouée : ' + msg + '\nRéessai à la prochaine vérification.');
+        }
+      });
+    }).catch(function(){
+      _showBackupPermissionBanner(_backupDirHandle.name || 'dossier backup');
     });
   }
 }
@@ -3311,17 +3428,47 @@ function _runAutoBackup(cb) {
     var ds  = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate());
     var ts  = pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
     var cnt = pad(_backupCounter, 3);
-    var fname = 'backup_DM-PLANNING_' + ds + '_' + ts + '_' + cnt + '.xlsx';
+    var fnameXlsx = 'backup_DM-PLANNING_' + ds + '_' + ts + '_' + cnt + '.xlsx';
+    var fnameJson = 'backup_DM-PLANNING_' + ds + '_' + ts + '_' + cnt + '.json';
 
-    // Écrire via File System Access API
-    _backupDirHandle.getFileHandle(fname, { create: true }).then(function(fh) {
+    // ── 1. Écrire le fichier Excel ────────────────────────────────────────
+    var xlsxPromise = _backupDirHandle.getFileHandle(fnameXlsx, { create: true }).then(function(fh) {
       return fh.createWritable();
     }).then(function(w) {
       var buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       var blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       return w.write(blob).then(function() { return w.close(); });
-    }).then(function() {
-      if(cb) cb(true, fname);
+    });
+
+    // ── 2. Écrire le fichier JSON (backup brut complet) ───────────────────
+    var jsonPayload = {
+      _backupDate: new Date().toISOString(),
+      _backupVersion: 'V20.1',
+      _backupBy: ROLE || 'dm',
+      equips: APP.equips || [],
+      agents: APP.agents || [],
+      planning: APP.planning || {},
+      masterplan: APP.masterplan || {},
+      suiviTaches: APP.suiviTaches || {},
+      taches: APP.taches || [],
+      dm: APP.dm || [],
+      urg: APP.urg || [],
+      hist: APP.hist || [],
+      tacheTypes: APP.tacheTypes || [],
+      priorityRules: APP.priorityRules || {},
+      familles: APP.familles || [],
+      metiers: APP.metiers || []
+    };
+    var jsonPromise = _backupDirHandle.getFileHandle(fnameJson, { create: true }).then(function(fh) {
+      return fh.createWritable();
+    }).then(function(w) {
+      var blob = new Blob([JSON.stringify(jsonPayload, null, 2)], { type: 'application/json' });
+      return w.write(blob).then(function() { return w.close(); });
+    });
+
+    // ── Attendre les deux écritures ───────────────────────────────────────
+    Promise.all([xlsxPromise, jsonPromise]).then(function() {
+      if(cb) cb(true, fnameXlsx + ' + ' + fnameJson);
     }).catch(function(err) {
       if(cb) cb(false, err.message || String(err));
     });
@@ -3330,7 +3477,98 @@ function _runAutoBackup(cb) {
   });
 }
 
-// Construire le workbook de backup (même structure qu'export manuel)
+// ════════════════════════════════════════════════════════════════
+// V20.1 — MODULE 1 : RESET HEBDOMADAIRE (Dimanche soir / Lundi matin)
+// Règles :
+//   - Tâches 'validee' (done:true)  → archivées dans _archivedTasks
+//   - Tâches 'en_attente' (done:false) → reportées dans la nouvelle semaine
+// Déclenchement : dimanche ≥ 20h ou lundi si weekKey a changé
+// ════════════════════════════════════════════════════════════════
+function _weeklyReset() {
+  try {
+    var wi     = getWeekInfo();
+    var newWk  = 'S' + wi.num + '-' + new Date().getFullYear();
+    var lastWk = APP.planning ? (APP.planning.weekKey || '') : '';
+    if (!lastWk || lastWk === newWk) return; // Même semaine → rien à faire
+
+    console.log('[V20.1] Reset hebdomadaire : ' + lastWk + ' → ' + newWk);
+
+    if (!APP.suiviTaches) APP.suiviTaches = {};
+
+    // ── Pour chaque équipement de la semaine précédente ──────────────────
+    var prevWeekData = APP.suiviTaches[lastWk] || {};
+    Object.keys(prevWeekData).forEach(function(eid) {
+      var entry = prevWeekData[eid];
+      var taches = Array.isArray(entry) ? entry : (entry && Array.isArray(entry.taches) ? entry.taches : []);
+      var deletedIds = (entry && entry._deletedTaskIds) ? entry._deletedTaskIds : [];
+
+      var toCarry = [];
+      taches.forEach(function(t) {
+        if (!t || !t.id) return;
+        if (deletedIds.indexOf(t.id) !== -1) return;  // supprimée → oubliée
+        if (t.statut === 'validee' || t.done) {
+          // Tâche validée → archivée (on la garde dans la semaine passée uniquement)
+          // Ne pas reporter
+        } else {
+          // Tâche en_attente → reporter dans la nouvelle semaine
+          toCarry.push(t);
+        }
+      });
+
+      if (toCarry.length > 0) {
+        if (!APP.suiviTaches[newWk]) APP.suiviTaches[newWk] = {};
+        if (!APP.suiviTaches[newWk][eid]) APP.suiviTaches[newWk][eid] = { taches: [] };
+        var newEntry = APP.suiviTaches[newWk][eid];
+        if (Array.isArray(newEntry)) newEntry = { taches: newEntry };
+        if (!Array.isArray(newEntry.taches)) newEntry.taches = [];
+        var existingIds = newEntry.taches.map(function(t){ return t.id; });
+        toCarry.forEach(function(t) {
+          if (existingIds.indexOf(t.id) === -1) {
+            var carried = JSON.parse(JSON.stringify(t));
+            carried._carriedFrom = lastWk;
+            newEntry.taches.push(carried);
+          }
+        });
+        APP.suiviTaches[newWk][eid] = newEntry;
+        console.log('[V20.1] ' + toCarry.length + ' tâche(s) reportée(s) pour équipement ' + eid);
+      }
+    });
+
+    // ── Mettre à jour weekKey du planning ────────────────────────────────
+    if (APP.planning) APP.planning.weekKey = newWk;
+
+    // ── Réinitialiser le planning daily (nouveau planning propre) ────────
+    // Conserver les équipements figés (frozen)
+    var frozenEquips = {};
+    ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'].forEach(function(d) {
+      var dayData = (APP.planning.daily && APP.planning.daily[d]) || {};
+      Object.keys(dayData).forEach(function(eid) {
+        if (dayData[eid] && dayData[eid].frozen) frozenEquips[eid] = true;
+      });
+    });
+    APP.planning.daily = { lundi:{}, mardi:{}, mercredi:{}, jeudi:{}, vendredi:{}, samedi:{}, dimanche:{} };
+    // Réintégrer les équipements figés dans le nouveau planning
+    Object.keys(frozenEquips).forEach(function(eid) {
+      ['lundi','mardi','mercredi','jeudi','vendredi','samedi'].forEach(function(d) {
+        APP.planning.daily[d][eid] = { included: true, frozen: true, pieces: 'Non disponible', heures: 8, agent: '', commentaire: '', realisation: 0 };
+      });
+    });
+    APP.planning.top10ids = [];
+
+    _stampSection('planning');
+    _stampField('suiviTaches');
+    saveApp();
+    if (_fbApp && _fbDB) _fbWriteToCloud();
+
+    toast('📅 Nouvelle semaine ' + newWk + ' — planning réinitialisé.\n' +
+          'Les tâches en attente ont été reportées automatiquement.');
+    console.log('[V20.1] Reset hebdomadaire terminé → semaine ' + newWk);
+  } catch(e) {
+    console.error('[V20.1] Erreur _weeklyReset:', e);
+  }
+}
+
+
 function _buildBackupWorkbook() {
   var wb = XLSX.utils.book_new();
 
@@ -3389,7 +3627,7 @@ function _buildBackupWorkbook() {
   return wb;
 }
 
-// Configurer le dossier de sauvegarde (bouton dans Admin)
+// Configurer le dossier de sauvegarde (bouton dans Admin — UNIQUEMENT sur action manuelle)
 function configureBackupFolder() {
   if (ROLE !== 'dm') { toast('Réservé au Directeur Matériel.'); return; }
   if (!window.showDirectoryPicker) {
@@ -3398,17 +3636,24 @@ function configureBackupFolder() {
   }
   window.showDirectoryPicker({ mode: 'readwrite' }).then(function(dirHandle) {
     _backupDirHandle = dirHandle;
-    // Persister le handle
+    // V20.1: Persister le handle dans IndexedDB (clé standard)
     _idbOpen(function(db) {
-      if (!db) return;
-      var tx = db.transaction('kv', 'readwrite');
-      tx.objectStore('kv').put(dirHandle, 'dm_backup_dir_handle');
+      if (!db) { console.warn('[Backup] IndexedDB non disponible pour sauvegarder le handle.'); return; }
+      try {
+        var tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').put(dirHandle, 'dm_backup_dir_handle');
+        tx.oncomplete = function() { console.log('[Backup] Handle sauvegardé dans IndexedDB : ' + dirHandle.name); };
+        tx.onerror = function(e) { console.error('[Backup] Erreur IndexedDB put:', e); };
+      } catch(e) { console.error('[Backup] Exception IndexedDB:', e); }
     });
     var cfg = _loadBackupConfig();
     cfg.enabled = true;
     _saveBackupConfig(cfg);
+    // Supprimer la bannière si visible
+    var banner = document.getElementById('backup-perm-banner');
+    if (banner) banner.remove();
     toast('\u2705 Dossier de sauvegarde configuré : ' + dirHandle.name +
-          '\nSauvegarde automatique : mercredi 12h–17h.');
+          '\nSauvegarde automatique : mercredi 12h–17h.\nDouble backup : Excel + JSON.');
     showPage('admin');
   }).catch(function(err) {
     if (err.name !== 'AbortError') toast('\u274C Erreur : ' + err.message);
@@ -4043,6 +4288,10 @@ function _applyLogin(role, saveSession) {
   setTimeout(_dbRestoreHandle, 500);
   // Initialiser le système de sauvegarde automatique (DM uniquement)
   if (role === 'dm') setTimeout(_initAutoBackup, 1000);
+  // V20.1 MODULE 1 : Vérifier si un reset hebdomadaire est nécessaire (DM uniquement)
+  if (role === 'dm') setTimeout(function() {
+    try { _weeklyReset(); } catch(e) { console.warn('[V20.1] _weeklyReset error:', e); }
+  }, 2500);
   // Afficher les conflits existants s'il y en a
   setTimeout(_updateConflictPanel, 600);
   // Nettoyer les équipements supprimés depuis plus de 7 jours
@@ -6244,7 +6493,8 @@ function addSuiviTacheFromPlan(eid) {
   var desc   = descEl ? descEl.value.trim() : '';
   if (!nom && !desc) { toast('Saisissez un type ou une description.'); return; }
   var taches   = getSuiviEquipTaches(eid);
-  var newTache = { id:'t'+Date.now()+'_'+Math.random().toString(36).slice(2,6), nom:nom, desc:desc, rh:[], done:false, addedBy:ROLE, addedAt:Date.now() };
+  var _tNow = Date.now();
+  var newTache = { id:'t'+_tNow+'_'+Math.random().toString(36).slice(2,6), nom:nom, desc:desc, rh:[], done:false, statut:'en_attente', dateCreation:_tNow, addedBy:ROLE, addedAt:_tNow };
   taches.push(newTache);
   _stampField('suivi.addTask.'+eid+'.'+newTache.id);
   saveApp();
@@ -6744,7 +6994,6 @@ function getSuiviEquipTaches(equipId) {
   var entry = APP.suiviTaches[wk][equipId];
   // ── Normaliser l'ancien format Firebase (tableau direct) vers { taches: [] } ──
   if (Array.isArray(entry)) {
-    // Ancien format: suiviTaches[wk][eid] = [t1, t2, ...] → migrer
     APP.suiviTaches[wk][equipId] = { taches: entry };
     entry = APP.suiviTaches[wk][equipId];
   }
@@ -6752,9 +7001,32 @@ function getSuiviEquipTaches(equipId) {
     APP.suiviTaches[wk][equipId] = { taches: [] };
     entry = APP.suiviTaches[wk][equipId];
   }
-  if (!Array.isArray(entry.taches)) {
-    entry.taches = [];
-  }
+  if (!Array.isArray(entry.taches)) entry.taches = [];
+
+  // ── V20.1 PERSISTANCE CROSS-SEMAINE ────────────────────────────────────────
+  // Inclure les tâches 'en_attente' des semaines précédentes qui n'ont pas été
+  // archivées. Elles sont visibles tant que statut !== 'validee'.
+  var currentIds = entry.taches.map(function(t){ return t.id; });
+  var sortedWeeks = Object.keys(APP.suiviTaches).filter(function(k){ return k !== wk; }).sort().reverse();
+  sortedWeeks.forEach(function(prevWk) {
+    var prevEntry = APP.suiviTaches[prevWk] && APP.suiviTaches[prevWk][equipId];
+    if (!prevEntry) return;
+    var prevTaches = Array.isArray(prevEntry) ? prevEntry : (prevEntry && Array.isArray(prevEntry.taches) ? prevEntry.taches : []);
+    var deletedIds = (prevEntry && prevEntry._deletedTaskIds) ? prevEntry._deletedTaskIds : [];
+    prevTaches.forEach(function(t) {
+      if (!t || !t.id) return;
+      // Ignorer les tâches supprimées, validées, ou déjà présentes cette semaine
+      if (deletedIds.indexOf(t.id) !== -1) return;
+      if (t.statut === 'validee' || t.done) return;
+      if (currentIds.indexOf(t.id) !== -1) return;
+      // Tâche en_attente reportée → visible dans la semaine courante
+      var carried = JSON.parse(JSON.stringify(t));
+      carried._carriedFrom = prevWk;  // badge indicatif
+      entry.taches.push(carried);
+      currentIds.push(carried.id);
+    });
+  });
+
   return entry.taches;
 }
 
@@ -6885,7 +7157,8 @@ function addSuiviTache(eid) {
   var desc = descEl ? descEl.value.trim() : '';
   if (!nom && !desc) { toast('Saisissez au moins un nom ou une description.'); return; }
   var taches = getSuiviEquipTaches(eid);
-  var newTache = { id: 't' + Date.now() + '_' + Math.random().toString(36).slice(2,6), nom: nom, desc: desc, rh: [], done: false, addedBy: ROLE, addedAt: Date.now() };
+  var now = Date.now();
+  var newTache = { id: 't' + now + '_' + Math.random().toString(36).slice(2,6), nom: nom, desc: desc, rh: [], done: false, statut: 'en_attente', dateCreation: now, addedBy: ROLE, addedAt: now };
   taches.push(newTache);
   _stampField('suivi.addTask.' + eid + '.' + newTache.id);
   saveApp();
@@ -6922,8 +7195,9 @@ function validateSuiviTache(eid, tid, isDone) {
   var t = taches.find(function(x){ return x.id === tid; });
   if (!t) return;
   t.done = isDone;
-  t.doneAt = Date.now();    // timestamp pour Smart Merge
-  t.doneBy = ROLE || 'chef'; // profil qui a validé
+  t.statut = isDone ? 'validee' : 'en_attente';  // V20.1: statut explicite pour persistance
+  t.doneAt = isDone ? Date.now() : null;  // timestamp pour Smart Merge
+  t.doneBy = isDone ? (ROLE || 'chef') : null; // profil qui a validé
   _stampField('suivi.' + tid);
   // Auto-update equip status if 100%
   var pct = computeEquipPct(eid);
@@ -8980,6 +9254,18 @@ function _loadDynPermissions() {
       return;
     }
     _dynPerms = p;
+    // ── V20.1 MODULE 2: Restaurer l'état de verrouillage depuis Firebase ───
+    // Firebase est la source de vérité — le lock doit survivre aux rechargements
+    if (typeof p.priorityRulesLocked === 'boolean') {
+      var wasLocked = !!APP.priorityRulesLocked;
+      APP.priorityRulesLocked   = p.priorityRulesLocked;
+      APP.priorityRulesLockedAt = p.updatedAt || null;
+      try { localStorage.setItem('pr_locked', JSON.stringify({ locked: APP.priorityRulesLocked, at: APP.priorityRulesLockedAt })); } catch(e2) {}
+      if (wasLocked !== APP.priorityRulesLocked) {
+        console.log('[V20.1] État verrou priorités mis à jour depuis Firebase :', APP.priorityRulesLocked ? '🔒 VERROUILLÉ' : '🔓 DÉVERROUILLÉ');
+        try { _refreshAdminLockUI(); } catch(e2) {}
+      }
+    }
     // ── Firebase = source de vérité ─────────────────────────────────────────
     // Les règles Firebase ÉCRASENT toujours les valeurs par défaut locales
     if (p.priorityRules && typeof p.priorityRules === 'object') {
@@ -9663,6 +9949,45 @@ function _sanitizeObj(val) {
 
 function _fbWriteToCloud() {
   if (!_fbApp || !_fbDB || !_fbAuth || !_fbAuth.currentUser) return;
+
+  // ── PILIER 1 : Double verrou dans _fbWriteToCloud ──────────────────────────
+  if (!isInitialLoadComplete) {
+    console.warn('[_fbWriteToCloud] BLOQUÉ — verrou d\'initialisation actif. Écriture annulée.');
+    return;
+  }
+
+  // ── MODULE 4 V20.1: Validation de schéma avant écriture ───────────────────
+  if (!APP || typeof APP !== 'object') {
+    console.error('[V20.1] _fbWriteToCloud: APP null ou invalide — écriture annulée.');
+    return;
+  }
+  if (!Array.isArray(APP.equips)) {
+    console.error('[V20.1] _fbWriteToCloud: APP.equips non valide — écriture annulée.');
+    return;
+  }
+  if (!Array.isArray(APP.agents)) {
+    console.error('[V20.1] _fbWriteToCloud: APP.agents non valide — écriture annulée.');
+    return;
+  }
+
+  // ── PILIER 3 : Détection de vidange accidentelle ───────────────────────────
+  var currentEquipsCount = (APP.equips || []).filter(function(e){ return !e.deleted; }).length;
+  if (_lastKnownEquipsCount > 50 && currentEquipsCount === 0) {
+    var msg = '⛔ ERREUR DE SYNCHRONISATION DÉTECTÉE\n\n' +
+              'Tentative d\'effacement massif bloquée :\n' +
+              'Le parc est passé de ' + _lastKnownEquipsCount + ' à 0 équipements\n' +
+              'en une seule opération.\n\n' +
+              'L\'écriture vers Firebase a été annulée.\n\n' +
+              '➡ Action recommandée : rechargez la page (F5)\n' +
+              'pour restaurer les données depuis Firebase.';
+    alert(msg);
+    console.error('[Sécurité] VIDANGE ACCIDENTELLE DÉTECTÉE — écriture bloquée.', {
+      avant: _lastKnownEquipsCount, apres: currentEquipsCount
+    });
+    return;
+  }
+  if (currentEquipsCount > 0) _lastKnownEquipsCount = currentEquipsCount;
+
   console.log('Firebase: écriture vers serveur — profil:', ROLE, '— ' + new Date().toLocaleTimeString('fr-FR'));
   // ⚡ RACE CONDITION FIX: bloquer le listener _ts pendant le debounce
   SYNC._fbLastWriteTs = Date.now();
@@ -9671,49 +9996,61 @@ function _fbWriteToCloud() {
     try {
       var ts = Date.now();
       var ref = _fbDB.ref('atcdata');
+
+      // ── MODULE 4 V20.1: Sérialiser avec protection null ──────────────────
+      function _safeSanitize(val) {
+        if (val === null || val === undefined) return {};
+        return _sanitizeObj(val);
+      }
+      function _safeSanitizeArr(val) {
+        if (!Array.isArray(val)) return [];
+        return _sanitizeObj(val);
+      }
+
       var update = {
         '_by': ROLE, '_ts': ts, '_v': 'v8',
-        '_fieldTs':        _sanitizeObj(APP.fieldTs     || {}),
-        '_sections':       _sanitizeObj(SYNC._sectionTs || {}),
+        '_fieldTs':        _safeSanitize(APP.fieldTs),
+        '_sections':       _safeSanitize(SYNC._sectionTs),
         '_deletedAgentIds': APP._deletedAgentIds || [],
         '_deletedEquipIds': APP._deletedEquipIds || [],
-        'equips':    _sanitizeObj(APP.equips    || []),
-        'agents':    _sanitizeObj(APP.agents    || []),
-        'planning':  _sanitizeObj(APP.planning  || {}),
-        'suiviTaches': _sanitizeObj(APP.suiviTaches || {}),
-        'taches':    _sanitizeObj(APP.taches    || []),
-        'hist':      _sanitizeObj(APP.hist      || []),
-        'dm':        _sanitizeObj(APP.dm        || []),   // Instructions DM — sync bidirectionnelle
-        'urg':       _sanitizeObj(APP.urg       || []),   // Urgences
-        'masterplan':_sanitizeObj(APP.masterplan|| {}),   // Master Planning
-        'pw':        _sanitizeObj(APP.pw        || {}),   // Mots de passe
-        // priorityRules EXCLU du payload général — envoyé uniquement par DM (voir bloc DM ci-dessous)
+        'equips':    _safeSanitizeArr(APP.equips),
+        'agents':    _safeSanitizeArr(APP.agents),
+        'planning':  _safeSanitize(APP.planning),
+        'suiviTaches': _safeSanitize(APP.suiviTaches),
+        'taches':    _safeSanitizeArr(APP.taches),
+        'hist':      _safeSanitizeArr(APP.hist),
+        'dm':        _safeSanitizeArr(APP.dm),
+        'urg':       _safeSanitizeArr(APP.urg),
+        'masterplan':_safeSanitize(APP.masterplan),
+        'pw':        _safeSanitize(APP.pw),
         'masterplanLocked': APP.masterplanLocked || false
       };
       if (ROLE === 'dm') {
-        update['masterplan']       = _sanitizeObj(APP.masterplan || {});
+        update['masterplan']       = _safeSanitize(APP.masterplan);
         update['masterplanLocked'] = APP.masterplanLocked || false;
-        update['priorityRules']    = _sanitizeObj(APP.priorityRules || {});  // DM uniquement
+        update['priorityRules']    = _safeSanitize(APP.priorityRules);
         update['priorityRulesLocked']   = !!APP.priorityRulesLocked;
         update['priorityRulesLockedAt'] = APP.priorityRulesLockedAt || null;
-        update['dm_inst']          = _sanitizeObj(APP.dm  || []);
-        update['urg']              = _sanitizeObj(APP.urg  || []);
-        update['pw']               = _sanitizeObj(APP.pw   || {});
-        update['priorityRules']    = _sanitizeObj(APP.priorityRules || {});
+        update['dm_inst']          = _safeSanitizeArr(APP.dm);
+        update['urg']              = _safeSanitizeArr(APP.urg);
+        update['pw']               = _safeSanitize(APP.pw);
         update['tacheTypes']       = APP.tacheTypes || [];
-        // v20.0: appConfig inclus dans le payload DM (nœud /atcdata/appConfig)
         update['appConfig']        = { nomLogiciel: APP_CONFIG.nomLogiciel||'DM-PLANNING', signature: APP_CONFIG.signature||'Asset Manager', version: APP_CONFIG.version||'' };
       }
       SYNC._fbLastWriteTs = ts;
       ref.update(update).then(function() {
-        _fbSetCloudBadge('ok', '\u2601 Synchronis\u00e9');
+        _fbSetCloudBadge('ok', '\u2601 Synchronisé');
         try { localStorage.removeItem(SK + '_offline_pending'); } catch(e) {}
       }).catch(function(err) {
         _fbSetCloudBadge('error', '\u2601 Erreur');
         _saveLocalOnly();
+        console.error('[V20.1] Firebase write error:', err.code, err.message);
         toast('\u274c Firebase : ' + (err.code||err.message||'erreur'));
       });
-    } catch(e) { console.error('Firebase write:', e); }
+    } catch(e) {
+      console.error('[V20.1] Firebase write exception:', e);
+      toast('\u274c Erreur critique écriture Firebase : ' + (e.message || e));
+    }
   }, 400);
 }
 
@@ -10031,6 +10368,58 @@ function toggleStandby(eid) {
   text-transform:uppercase;letter-spacing:.3px;
   background:#0a1628;color:#fff;
   text-align:center;border:none;
+}
+</style>
+<!-- ══════════ OVERLAY SÉCURITÉ — PILIER 4 ══════════ -->
+<!-- Bloque l'interface tant que Firebase n'a pas confirmé le chargement -->
+<div id="firebase-loading-overlay" style="
+  display:none;
+  position:fixed;
+  inset:0;
+  z-index:99999;
+  background:rgba(10,22,40,0.92);
+  backdrop-filter:blur(4px);
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+  gap:22px;
+  font-family:'Barlow Condensed',sans-serif;
+">
+  <!-- Spinner -->
+  <div style="
+    width:56px;height:56px;
+    border:4px solid rgba(245,158,11,0.2);
+    border-top-color:#f59e0b;
+    border-radius:50%;
+    animation:fb-spin 0.85s linear infinite;
+  "></div>
+  <!-- Texte -->
+  <div style="text-align:center;">
+    <div style="color:#f59e0b;font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">
+      Synchronisation sécurisée
+    </div>
+    <div style="color:rgba(255,255,255,0.75);font-size:14px;font-weight:400;letter-spacing:.3px;">
+      Chargement des données Firebase en cours…
+    </div>
+    <div style="color:rgba(148,163,184,0.6);font-size:11px;margin-top:8px;letter-spacing:.2px;">
+      L'interface sera déverrouillée après confirmation du serveur
+    </div>
+  </div>
+  <!-- Badge sécurité -->
+  <div style="
+    display:flex;align-items:center;gap:7px;
+    background:rgba(245,158,11,0.1);
+    border:1px solid rgba(245,158,11,0.25);
+    border-radius:20px;padding:5px 14px;
+    color:rgba(245,158,11,0.8);font-size:11px;font-weight:600;letter-spacing:.5px;
+  ">
+    🔒 Protection anti-écrasement active
+  </div>
+</div>
+<style>
+@keyframes fb-spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 </style>
 
