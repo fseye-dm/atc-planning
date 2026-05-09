@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════
-  DM-PLANNING v20.4 — SOSETER HYDRO — F. SEYE — Directeur Matériel
+  DM-PLANNING v20.5 — SOSETER HYDRO — F. SEYE — Directeur Matériel
   GitHub Pages : https://fseye-dm.github.io/atc-planning/
   Firebase : dm-planning-soseter | Zone : europe-west1
 
@@ -95,16 +95,169 @@
   ✅ Guide d'utilisation mis à jour — adaptatif DM/Chef (7 sections)
 
   Firebase config : apiKey AIzaSyCiu_... | fseye2018@gmail.com (DM) | souleyecisse017@gmail.com (Chef)
+
+  ── CHANGELOG v20.5 (vs v20.4) ──────────────────────────────────
+  ✅ BUG FIX — PRIORITÉ DM sur validation instruction (MODULE 08)
+     markDone() : guard ajouté → Chef ne peut plus écrire executed=true
+     renderDMList() : checkbox Chef rendue disabled + label "Validation DM"
+     Firebase : aucune écriture Chef sur dm.*.executed quand val=true
+     node --check : syntaxe JS validée
+
+  ── CHANGELOG v20.6-2 (vs v20.6-1) ──────────────────────────────
+  ✅ NETTOYAGE CONSOLE — Suppression script Kaspersky parasite
+     Cause : Extension Kaspersky avait injecté son script dans le HTML
+     lors d'un "Enregistrer sous" depuis le navigateur infecté.
+     Symptômes éliminés :
+       ✗ ERR_FAILED sur me.kis.v2.scr.kaspersky-labs.com
+       ✗ Access to XMLHttpRequest blocked by CORS policy
+       ✗ undefined:1 404 (bruits résiduels Firebase masqués)
+     Solution : Script parasite supprimé + garde XHR/fetch silencieux
+     ajouté pour bloquer toute future ré-injection d'extension tierce.
+     Firebase, Chart.js, SheetJS : non modifiés — fonctionnement intact.
+     Séquencement Firebase : confirmé correct (3/3 scripts avant _fbInit).
+     node --check : syntaxe JS validée.
+
+  ── CHANGELOG v20.6-1 (vs v20.6) ──────────────────────────────
+  ✅ MODULE 10 — JOURNAL DES TÂCHES — Export Excel operationnel
+     Suppression doublon mort (_buildJournalData x2, renderJournal x2)
+     Bouton Export Excel ajoute en haut a droite du tableau journal
+     Bouton Imprimer co-localise (coherence UI)
+     id="journal-table" ajoute pour printJournal() compatible
+     exportJournalXLSX() + _getFilteredJournalRows() : inchanges
+     SheetJS 0.18.5 (charge) — fallback TSV si absent
+     Colonnes export : Code, Famille, Statut, Date, Type, Tache, RH, MTTR
+     Perimetre : MODULE 10 uniquement — autres modules intacts
+     node --check : syntaxe JS validee
 ═══════════════════════════════════════════════════════════════════ -->
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a1628'/%3E%3Ctext x='6' y='24' font-size='20' font-family='Arial' font-weight='bold' fill='%23f97316'%3EAT%3C/text%3E%3C/svg%3E">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DM-PLANNING v20.1 | Direction Matériel Planning — SOSETER HYDRO</title>
+<title>DM-PLANNING v20.6-2 | Direction Matériel Planning — SOSETER HYDRO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script type="text/javascript" src="https://me.kis.v2.scr.kaspersky-labs.com/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js?attr=VZK8tmkSIeCvoBTw__0-7eLIV39Ey2RpdjGjT3xMPIFwyIKAWP5UJad6DZSh5xIeAUeSD6CggVc7dHfLzAhXYw" charset="UTF-8"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<!--
+  ══ NETTOYAGE v20.6-2 ════════════════════════════════════════════
+  Script Kaspersky supprimé — injecté accidentellement par l'extension
+  navigateur lors d'un "Enregistrer sous" (Save Page As).
+  Ce script NE fait PAS partie du code DM-PLANNING.
+  Sur tout poste sans l'extension Kaspersky, il provoquait :
+    ✗ ERR_FAILED sur me.kis.v2.scr.kaspersky-labs.com
+    ✗ Access to XMLHttpRequest blocked by CORS policy
+  ═════════════════════════════════════════════════════════════════
+-->
+<script>
+/* ── GARDE ANTI-INJECTION TIERS — v20.6-2 ─────────────────────────
+   Intercepte silencieusement toute requête XHR ou fetch vers des
+   domaines de sécurité tiers (Kaspersky, antivirus) qui pourraient
+   être ré-injectés par une extension navigateur à l'exécution.
+   N'affecte PAS Firebase ni les CDN légitimes.
+──────────────────────────────────────────────────────────────────── */
+(function() {
+  'use strict';
+
+  // Domaines bloqués silencieusement (regex)
+  var _BLOCKED_DOMAINS = [
+    /kaspersky/i,
+    /kis\.v2\.scr/i,
+    /kaspersky-labs\.com/i
+  ];
+
+  function _isDomainBlocked(url) {
+    if (!url || typeof url !== 'string') return false;
+    return _BLOCKED_DOMAINS.some(function(rx) { return rx.test(url); });
+  }
+
+  // ── Intercepteur XHR ──────────────────────────────────────────
+  var _OrigXHR = window.XMLHttpRequest;
+  function _GuardedXHR() {
+    var _xhr  = new _OrigXHR();
+    var _self = this;
+    var _url  = '';
+    var _blocked = false;
+
+    // Transférer toutes les propriétés non-bloquées
+    var props = ['readyState','response','responseText','responseType',
+                 'responseURL','responseXML','status','statusText',
+                 'timeout','upload','withCredentials'];
+    props.forEach(function(p) {
+      Object.defineProperty(_self, p, {
+        get: function() { return _blocked ? (p==='readyState'?4:p==='status'?0:'') : _xhr[p]; },
+        set: function(v) { if (!_blocked) try { _xhr[p] = v; } catch(e){} }
+      });
+    });
+
+    ['onreadystatechange','onload','onerror','onabort','ontimeout',
+     'onloadstart','onloadend','onprogress'].forEach(function(ev) {
+      Object.defineProperty(_self, ev, {
+        get: function() { return _blocked ? null : _xhr[ev]; },
+        set: function(fn) { if (!_blocked) _xhr[ev] = fn; }
+      });
+    });
+
+    this.open = function(method, url) {
+      _url = url || '';
+      if (_isDomainBlocked(_url)) {
+        _blocked = true;
+        return; // Abandonner silencieusement
+      }
+      _xhr.open.apply(_xhr, arguments);
+    };
+
+    this.send = function() {
+      if (_blocked) return; // Requête bloquée — ne rien envoyer
+      _xhr.send.apply(_xhr, arguments);
+    };
+
+    this.setRequestHeader = function(h, v) {
+      if (!_blocked) _xhr.setRequestHeader(h, v);
+    };
+
+    this.abort         = function() { if (!_blocked) _xhr.abort(); };
+    this.getResponseHeader = function(h) { return _blocked ? null : _xhr.getResponseHeader(h); };
+    this.getAllResponseHeaders = function() { return _blocked ? '' : _xhr.getAllResponseHeaders(); };
+
+    ['addEventListener','removeEventListener','dispatchEvent'].forEach(function(m) {
+      _self[m] = function() { if (!_blocked) _xhr[m].apply(_xhr, arguments); };
+    });
+  }
+
+  // Copier les propriétés statiques de XMLHttpRequest
+  ['UNSENT','OPENED','HEADERS_RECEIVED','LOADING','DONE'].forEach(function(k) {
+    _GuardedXHR[k] = _OrigXHR[k];
+    _GuardedXHR.prototype[k] = _OrigXHR[k];
+  });
+
+  window.XMLHttpRequest = _GuardedXHR;
+
+  // ── Intercepteur fetch ────────────────────────────────────────
+  var _origFetch = window.fetch;
+  if (_origFetch) {
+    window.fetch = function(resource, opts) {
+      var url = (resource && typeof resource === 'object' && resource.url)
+                ? resource.url
+                : String(resource || '');
+      if (_isDomainBlocked(url)) {
+        // Retourner une réponse vide silencieuse — pas d'erreur console
+        return Promise.resolve(new Response('', { status: 200, statusText: 'OK (blocked)' }));
+      }
+      return _origFetch.apply(this, arguments);
+    };
+  }
+
+  // ── Filtre console.error pour bruits résiduels ────────────────
+  // Masque uniquement les erreurs CORS/ERR_FAILED de domaines tiers connus
+  var _origErr = console.error;
+  console.error = function() {
+    var msg = Array.prototype.slice.call(arguments).join(' ');
+    if (/kaspersky|kis\.v2\.scr|ERR_FAILED.*kaspersky/i.test(msg)) return;
+    _origErr.apply(console, arguments);
+  };
+
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
@@ -933,7 +1086,7 @@ textarea{resize:vertical;min-height:60px}
         </div>
       </div>
       <div class="card mb3">
-        <div class="ch"><span class="stitle" style="font-size:12px;margin:0;">Commentaire Chef d\'Atelier</span></div>
+        <div class="ch"><span class="stitle" style="font-size:12px;margin:0;">Commentaire Chef d'Atelier</span></div>
         <div class="cb"><textarea id="rpt-comment" rows="3" placeholder="Observations, points d'attention, recommandations..."></textarea></div>
       </div>
       <!-- Filtre lignes PDF — v20.0 -->
@@ -1101,7 +1254,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v20.4';
+var APP_VERSION = 'v20.5';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -7870,7 +8023,7 @@ function saveEquip() {
       _stampField('equip.' + _ex.code + '.desc'); _stampField('equip.' + _ex.code + '.statut');
       window._editEquipId = null;
       saveApp(); if (_fbApp && _fbDB) _fbWriteToCloud();
-      closeM('m-eq'); filterEq();
+      closeM('m-equip'); filterEq();
       toast('\u2705 Équipement modifié : ' + _ex.code);
       return;
     }
@@ -8037,12 +8190,13 @@ function renderDMList(filter) {
       '</div>' +
       '<div style="display:flex;align-items:center;gap:7px;margin-top:7px;padding-top:7px;border-top:1px solid var(--g100);">' +
         (!isLocked
-          ? // Instruction non validée : Chef peut commenter + DM peut valider
+          ? // Instruction non validée : Chef commente, DM seul peut valider
             (ROLE === 'dm'
               ? '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;text-transform:none;font-size:12px;font-weight:600;color:var(--grn);margin:0;">' +
                   '<input type="checkbox" onchange="markDone(\'' + d.id + '\',this.checked)"> ✔ Valider (DM)</label>'
-              : '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;text-transform:none;font-size:12px;font-weight:500;color:var(--grn);margin:0;">' +
-                  '<input type="checkbox" onchange="markDone(\'' + d.id + '\',this.checked)"> Marquer Exécuté</label>') +
+              : // Chef : validation verrouillée côté UI — seul le DM valide
+                '<label style="display:flex;align-items:center;gap:4px;cursor:not-allowed;text-transform:none;font-size:12px;font-weight:500;color:var(--g400);margin:0;" title="Validation réservée au DM — action non autorisée">' +
+                  '<input type="checkbox" disabled> 🔒 Validation réservée au DM</label>') +
             '<input type="text" placeholder="Votre retour / commentaire..." style="flex:1;font-size:11px;" ' +
               'onchange="addDMComment(\'' + d.id + '\',this.value)" value="' + (d.comment||'') + '">'
           : // Instruction validée (verrouillée)
@@ -8063,6 +8217,15 @@ function renderDMList(filter) {
 function markDone(id, val) {
   var d = APP.dm.find(function(d){return d.id===id;});
   if (d) {
+    // ── GUARD PRIORITÉ DM — v20.5 ─────────────────────────────────────────────
+    // Seul le DM peut poser le verrou de validation (executed = true).
+    // Si le Chef tente de valider → blocage immédiat, aucune écriture Firebase.
+    if (ROLE !== 'dm' && val === true) {
+      toast('⛔ Action réservée au DM — validation non autorisée.');
+      renderDMPage(); // reset visuel de la checkbox
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
     d.executed = val;
     _stampField('dm.' + id + '.executed');
     saveApp();
@@ -8438,12 +8601,12 @@ function buildReportHTML(forPrint) {
         '<tbody>' + rows + '</tbody></table>' +
         '</div>';
     })() +
-    // ── v20.4 : Commentaire Chef d\'Atelier — section Navy en fin de rapport ──────
+    // ── v20.4 : COMMENTAIRES CHEF ATELIER — section Navy en fin de rapport ──────
     (comment
       ? '<div style="margin-top:18px;border:2px solid #0A1F4E;border-radius:6px;overflow:hidden;page-break-inside:avoid;">' +
           '<div style="background:#0A1F4E;padding:9px 14px;display:flex;align-items:center;gap:10px;">' +
             '<span style="font-size:15px;">&#128203;</span>' +
-            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">Commentaire Chef d\'Atelier</span>' +
+            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">commentaires chef atelier</span>' +
             '<span style="margin-left:auto;font-size:9px;color:#8fa8d8;white-space:nowrap;">Chef d\'Atelier \u2014 ' + new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'}) + '</span>' +
           '</div>' +
           '<div style="padding:12px 16px 14px;background:#f8fafc;font-size:11px;color:#1e293b;line-height:1.75;white-space:pre-wrap;border-left:4px solid #0A1F4E;font-style:italic;">' +
@@ -8456,7 +8619,7 @@ function buildReportHTML(forPrint) {
         '</div>'
       : '<div style="margin-top:18px;border:2px solid #0A1F4E;border-radius:6px;overflow:hidden;page-break-inside:avoid;">' +
           '<div style="background:#0A1F4E;padding:9px 14px;">' +
-            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">&#128203; Commentaire Chef d\'Atelier</span>' +
+            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">&#128203; commentaires chef atelier</span>' +
           '</div>' +
           '<div style="padding:20px 16px;background:#f8fafc;font-size:10px;color:#94a3b8;text-align:center;font-style:italic;">' +
             'Aucun commentaire saisi \u2014 renseigner le champ &laquo;&nbsp;Commentaire Chef d\'Atelier&nbsp;&raquo; dans l\'onglet Rapport.' +
@@ -9464,257 +9627,6 @@ function _saveDynPermissions() {
 
 
 // ══════════════════════════════════════════════════════════════════════════
-// JOURNAL DES TÂCHES — Module V19.0
-// Registre historique chronologique (lecture seule) de toutes les tâches
-// ══════════════════════════════════════════════════════════════════════════
-
-function _buildJournalData() {
-  // Collecter toutes les tâches de toutes les semaines de APP.suiviTaches
-  var rows = [];
-  var weeks = Object.keys(APP.suiviTaches || {}).sort().reverse();
-  weeks.forEach(function(wk) {
-    var weekData = APP.suiviTaches[wk] || {};
-    Object.keys(weekData).forEach(function(eid) {
-      var entry = weekData[eid];
-      var taches = Array.isArray(entry) ? entry : (entry && Array.isArray(entry.taches) ? entry.taches : []);
-      var deleted = entry && entry._deletedTaskIds ? entry._deletedTaskIds : [];
-      var eq = APP.equips.find(function(e){ return e.id === eid; }) || { code: eid, famille: '—', desc: '—', statut: '—' };
-      taches.forEach(function(t) {
-        var isDeleted = deleted.indexOf(t.id) !== -1;
-        var rhNames = (t.rh || []).map(function(aid){
-          var ag = APP.agents.find(function(a){ return a.id === aid; });
-          return ag ? agentCode(ag) : aid;
-        }).join('; ');
-        rows.push({
-          wk: wk, eid: eid, tid: t.id,
-          code: eq.code, famille: eq.famille || '—', statut: eq.statut || '—',
-          panneDesc: eq.desc || '—',
-          tacheType: t.nom || '—',
-          tacheDesc: t.desc || '—',
-          rh: rhNames || '—',
-          done: !!t.done,
-          doneAt:  t.doneAt  || null,
-          addedAt: t.addedAt || null,
-          openAt:  t.addedAt || null,  // openAt = addedAt (modifiable par Chef)
-          isDeleted: isDeleted
-        });
-      });
-    });
-  });
-  // Tri: plus récent en haut (addedAt desc)
-  rows.sort(function(a, b){ return (b.addedAt||0) - (a.addedAt||0); });
-  return rows;
-}
-
-function renderJournal() {
-  var root = document.getElementById('journal-root') || document.getElementById('page-journal');
-  if (!root) { root = document.createElement('div'); root.id='journal-root'; (document.getElementById('page-journal')||document.getElementById('content')).appendChild(root); }
-  if (!root) return;
-
-  var allRows = _buildJournalData();
-
-  // ── KPIs ─────────────────────────────────────────────────────────────────
-  var total    = allRows.length;
-  var done     = allRows.filter(function(r){ return r.done && !r.isDeleted; }).length;
-  var inProg   = allRows.filter(function(r){ return !r.done && !r.isDeleted; }).length;
-  var deleted  = allRows.filter(function(r){ return r.isDeleted; }).length;
-  // Temps moyen de clôture
-  var closedRows = allRows.filter(function(r){ return r.done && r.doneAt && r.openAt && !r.isDeleted && (r.doneAt - r.openAt) > 0; });
-  var avgClose = closedRows.length ? Math.round(closedRows.reduce(function(s,r){ return s+(r.doneAt-r.openAt); },0)/closedRows.length/3600000) : null;
-  // MTTR — Mean Time To Repair (par équipement: de la 1ère tâche ouverte à la dernière validée)
-  var eqGroups = {};
-  allRows.filter(function(r){ return !r.isDeleted && r.openAt; }).forEach(function(r){
-    if (!eqGroups[r.eid]) eqGroups[r.eid] = { opens:[], closes:[] };
-    eqGroups[r.eid].opens.push(r.openAt);
-    if (r.done && r.doneAt) eqGroups[r.eid].closes.push(r.doneAt);
-  });
-  var mttrValues = [];
-  Object.keys(eqGroups).forEach(function(eid){
-    var g = eqGroups[eid];
-    if (g.closes.length > 0) {
-      var tOpen  = Math.min.apply(null, g.opens);
-      var tClose = Math.max.apply(null, g.closes);
-      if (tClose > tOpen) mttrValues.push((tClose - tOpen)/3600000);
-    }
-  });
-  var mttr = mttrValues.length ? Math.round(mttrValues.reduce(function(s,v){return s+v;},0)/mttrValues.length) : null;
-  // Type le + fréquent
-  var typeCount = {};
-  allRows.filter(function(r){ return !r.isDeleted; }).forEach(function(r){ typeCount[r.tacheType] = (typeCount[r.tacheType]||0)+1; });
-  var topType = Object.keys(typeCount).sort(function(a,b){ return typeCount[b]-typeCount[a]; })[0] || '—';
-
-  var h = '<div style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">' +
-    '<div class="stitle" style="font-size:15px;">📔 Journal des Tâches — Registre Historique</div>' +
-    '<div style="display:flex;gap:6px;">' +
-      '<button onclick="exportJournalXLSX()" class="btn bs sm" style="font-size:10px;">📊 Export Excel</button>' +
-    '<button onclick="printJournal()" class="btn bs sm" style="font-size:10px;">🖨 Imprimer / PDF</button>' +
-    '</div>' +
-  '</div>' +
-
-  // KPIs
-  '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
-    '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #3b82f6;"><div class="kv">' + total + '</div><div class="kl">Total</div></div>' +
-    '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #10b981;"><div class="kv">' + done + '</div><div class="kl">Clôturées</div></div>' +
-    '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #f97316;"><div class="kv">' + inProg + '</div><div class="kl">En cours</div></div>' +
-    '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #ef4444;"><div class="kv">' + deleted + '</div><div class="kl">Supprimées</div></div>' +
-    (avgClose!==null ? '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #8b5cf6;"><div class="kv">' + avgClose + 'h</div><div class="kl">Durée moy.</div></div>' : '') +
-    '<div class="kcard" style="flex:1;min-width:90px;border-left:4px solid #ec4899;"><div class="kv" style="font-size:' + (mttr!==null?'13':'11') + 'px;">' + (mttr!==null ? mttr+'h' : '—') + '</div><div class="kl">MTTR moy.</div></div>' +
-    '<div class="kcard" style="flex:1;min-width:110px;border-left:4px solid #eab308;"><div class="kv" style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escH(topType)+'">' + escH(topType.substring(0,13)) + '</div><div class="kl">Type fréquent</div></div>' +
-  '</div>' +
-
-  // ── Filtres multicritères (AND) ─────────────────────────────────────────
-  '<div style="background:var(--g50);border:1px solid var(--g200);border-radius:8px;padding:10px;margin-bottom:10px;">' +
-    '<div style="font-size:10px;font-weight:700;color:var(--g600);margin-bottom:6px;">🔍 Filtres (sélection multicritère — tous les critères actifs s\'appliquent simultanément)</div>' +
-    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;">' +
-      '<div style="display:flex;flex-direction:column;gap:2px;">' +
-        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Code équip.</label>' +
-        '<select id="jf-code" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:90px;">' +
-          '<option value="">Tous</option>' +
-          Array.from(new Set(allRows.map(function(r){return r.code;}))).sort().map(function(c){ return '<option value="'+escH(c)+'">'+ escH(c)+'</option>'; }).join('') +
-        '</select>' +
-      '</div>' +
-      '<div style="display:flex;flex-direction:column;gap:2px;">' +
-        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Famille</label>' +
-        '<select id="jf-famille" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:90px;">' +
-          '<option value="">Toutes</option>' +
-          Array.from(new Set(allRows.map(function(r){return r.famille;}))).sort().map(function(f){ return '<option value="'+escH(f)+'">'+escH(f)+'</option>'; }).join('') +
-        '</select>' +
-      '</div>' +
-      '<div style="display:flex;flex-direction:column;gap:2px;">' +
-        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Type tâche</label>' +
-        '<select id="jf-type" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:100px;">' +
-          '<option value="">Tous</option>' +
-          Object.keys(typeCount).sort().map(function(t){ return '<option value="'+escH(t)+'">'+escH(t)+'</option>'; }).join('') +
-        '</select>' +
-      '</div>' +
-      '<div style="display:flex;flex-direction:column;gap:2px;">' +
-        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Agent RH</label>' +
-        '<select id="jf-rh" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:90px;">' +
-          '<option value="">Tous</option>' +
-          APP.agents.filter(function(a){return a.actif;}).map(function(a){ var c=agentCode(a); return '<option value="'+escH(c)+'">'+escH(c)+'</option>'; }).join('') +
-        '</select>' +
-      '</div>' +
-      '<div style="display:flex;flex-direction:column;gap:2px;">' +
-        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Statut tâche</label>' +
-        '<select id="jf-statut" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:90px;">' +
-          '<option value="">Tous</option>' +
-          '<option value="done">✅ Clôturées</option>' +
-          '<option value="inprog">🔄 En cours</option>' +
-          '<option value="deleted">🗑 Supprimées</option>' +
-        '</select>' +
-      '</div>' +
-      '<div style="display:flex;flex-direction:column;gap:2px;">' +
-        '<label style="font-size:9px;color:var(--g500);font-weight:600;">Période</label>' +
-        '<select id="jf-period" onchange="renderJournal()" style="font-size:11px;padding:4px 6px;border:1px solid var(--g200);border-radius:5px;min-width:100px;">' +
-          '<option value="">Toutes</option>' +
-          '<option value="7">7 derniers jours</option>' +
-          '<option value="30">30 derniers jours</option>' +
-          '<option value="90">3 derniers mois</option>' +
-        '</select>' +
-      '</div>' +
-      '<button onclick="document.querySelectorAll(\'#jf-code,#jf-famille,#jf-type,#jf-rh,#jf-statut,#jf-period\').forEach(function(s){s.value=\'\';});renderJournal();" class="btn bd sm" style="font-size:10px;margin-top:14px;">✕ Effacer</button>' +
-    '</div>' +
-  '</div>';
-
-  // Lire les filtres actifs
-  var fCode   = (document.getElementById('jf-code')    || {}).value || '';
-  var fFam    = (document.getElementById('jf-famille') || {}).value || '';
-  var fType   = (document.getElementById('jf-type')    || {}).value || '';
-  var fRH     = (document.getElementById('jf-rh')      || {}).value || '';
-  var fStatut = (document.getElementById('jf-statut')  || {}).value || '';
-  var fPeriod = (document.getElementById('jf-period')  || {}).value || '';
-  var now = Date.now();
-  var periodMs = fPeriod ? parseInt(fPeriod) * 86400000 : 0;
-
-  // Restaurer les valeurs des filtres après re-render
-  function restoreFilters() {
-    var vals = {code:fCode,famille:fFam,type:fType,rh:fRH,statut:fStatut,period:fPeriod};
-    Object.keys(vals).forEach(function(k){
-      var el = document.getElementById('jf-'+k);
-      if (el && vals[k]) el.value = vals[k];
-    });
-  }
-
-  var filtered = allRows.filter(function(r){
-    if (fCode   && r.code !== fCode) return false;
-    if (fFam    && r.famille !== fFam) return false;
-    if (fType   && r.tacheType !== fType) return false;
-    if (fRH     && r.rh.indexOf(fRH) === -1) return false;
-    if (fStatut === 'done'    && (!r.done || r.isDeleted))  return false;
-    if (fStatut === 'inprog'  && (r.done  || r.isDeleted))  return false;
-    if (fStatut === 'deleted' && !r.isDeleted)              return false;
-    if (periodMs && r.openAt && (now - r.openAt) > periodMs) return false;
-    return true;
-  });
-
-  var nbActive = [fCode,fFam,fType,fRH,fStatut,fPeriod].filter(Boolean).length;
-  if (nbActive) h += '<div style="font-size:10px;color:var(--b5);font-weight:700;margin-bottom:6px;">&#9445; ' + nbActive + ' filtre(s) actif(s) — ' + filtered.length + ' résultat(s) sur ' + total + '</div>';
-
-  if (!filtered.length) { root.innerHTML = h + '<div class="al ai">Aucune tâche pour ces critères.</div>'; setTimeout(restoreFilters,0); return; }
-
-  // ── Tableau ──────────────────────────────────────────────────────────────
-  h += '<div style="overflow-x:auto;" id="journal-table-wrap">' +
-    '<table style="width:100%;border-collapse:collapse;font-size:10px;" id="journal-table">' +
-    '<thead><tr style="background:var(--b5);color:#fff;">' +
-      '<th style="padding:6px 5px;text-align:left;width:28px;">#</th>' +
-      '<th style="padding:6px 5px;text-align:left;white-space:nowrap;">Code</th>' +
-      '<th style="padding:6px 5px;text-align:left;">Famille</th>' +
-      '<th style="padding:6px 5px;text-align:left;">Statut</th>' +
-      '<th style="padding:6px 5px;text-align:left;min-width:100px;">Date ouverture ✏</th>' +
-      '<th style="padding:6px 5px;text-align:left;">Desc. panne</th>' +
-      '<th style="padding:6px 5px;text-align:left;">Type tâche</th>' +
-      '<th style="padding:6px 5px;text-align:left;">Desc. tâche</th>' +
-      '<th style="padding:6px 5px;text-align:left;">Agents RH</th>' +
-      '<th style="padding:6px 5px;text-align:left;">MTTR</th>' +
-      '<th style="padding:6px 5px;text-align:left;">Avancement</th>' +
-      '<th style="padding:6px 5px;text-align:left;">Date clôture</th>' +
-    '</tr></thead><tbody>';
-
-  filtered.forEach(function(r) {
-    var isDeleted = r.isDeleted, isDone = r.done && !isDeleted;
-    var rowBg = isDeleted ? '#fff0f0' : isDone ? '#f0fdf4' : '#fff';
-    var txtStyle = isDeleted ? 'text-decoration:line-through;color:#b91c1c;' : '';
-    var openDate = r.openAt ? new Date(r.openAt).toLocaleDateString('fr-FR') : '—';
-    var openDateVal = r.openAt ? new Date(r.openAt).toISOString().slice(0,10) : '';
-    var closeDate = (r.done && r.doneAt) ? new Date(r.doneAt).toLocaleDateString('fr-FR') : '—';
-    var statBg = r.statut==='OK' ? '#dcfce7;color:#166534' : '#fee2e2;color:#991b1b';
-    // MTTR pour cette tâche
-    var mttrCell = '—';
-    if (r.done && r.doneAt && r.openAt && r.doneAt > r.openAt) {
-      var hrs = Math.round((r.doneAt - r.openAt)/3600000);
-      mttrCell = hrs < 24 ? hrs + 'h' : Math.round(hrs/24) + 'j';
-    }
-
-    // Date ouverture éditable (Chef prioritaire)
-    var dateCell;
-    if (!isDeleted) {
-      dateCell = '<input type="date" value="' + escH(openDateVal) + '" ' +
-        'onchange="updateJournalOpenDate(\''+escH(r.wk)+'\',\''+escH(r.eid)+'\',\''+escH(r.tid)+'\',this.value)" ' +
-        'style="font-size:9px;border:1px solid var(--g200);border-radius:4px;padding:1px 4px;background:var(--g50);cursor:pointer;" ' +
-        'title="Cliquez pour modifier la date d\'ouverture (Chef prioritaire)">';
-    } else {
-      dateCell = escH(openDate);
-    }
-
-    h += '<tr style="background:'+rowBg+';border-bottom:1px solid var(--g100);">' +
-      '<td style="padding:5px;color:#94a3b8;font-size:9px;text-align:right;min-width:24px;">'+(filtered.indexOf(r)+1)+'</td>' +
-      '<td style="padding:5px;font-weight:700;color:var(--b5);'+txtStyle+'">'+escH(r.code)+'</td>' +
-      '<td style="padding:5px;'+txtStyle+'">'+escH(r.famille)+'</td>' +
-      '<td style="padding:5px;"><span style="background:'+statBg+';padding:1px 5px;border-radius:5px;font-size:9px;font-weight:700;">'+escH(r.statut)+'</span></td>' +
-      '<td style="padding:3px 5px;">'+dateCell+'</td>' +
-      '<td style="padding:5px;max-width:120px;'+txtStyle+'" title="'+escH(r.panneDesc)+'">'+escH(r.panneDesc.substring(0,35))+(r.panneDesc.length>35?'…':'')+'</td>' +
-      '<td style="padding:5px;'+txtStyle+'">'+escH(r.tacheType)+'</td>' +
-      '<td style="padding:5px;max-width:130px;'+txtStyle+'" title="'+escH(r.tacheDesc)+'">'+escH(r.tacheDesc.substring(0,40))+(r.tacheDesc.length>40?'…':'')+'</td>' +
-      '<td style="padding:5px;'+txtStyle+'">'+escH(r.rh)+'</td>' +
-      '<td style="padding:5px;font-weight:700;color:'+(mttrCell!=='—'?'#7c3aed':'#94a3b8')+';'+txtStyle+'">'+escH(mttrCell)+'</td>' +
-      '<td style="padding:5px;font-weight:700;color:'+(isDone?'#10b981':isDeleted?'#ef4444':'#f97316')+';'+txtStyle+'">'+(isDone?'✅ Clôturée':isDeleted?'🗑 Supprimée':'🔄 En cours')+'</td>' +
-      '<td style="padding:5px;color:#64748b;">'+escH(closeDate)+'</td>' +
-    '</tr>';
-  });
-  h += '</tbody></table></div>';
-  root.innerHTML = h;
-  setTimeout(restoreFilters, 0);
-}
 
 // ── Mettre à jour la date d'ouverture d'une tâche (Chef prioritaire) ──────
 function updateJournalOpenDate(wk, eid, tid, dateStr) {
@@ -9813,7 +9725,15 @@ function renderJournal() {
   var topType = Object.keys(typeCount).sort(function(a,b){ return typeCount[b]-typeCount[a]; })[0] || '—';
 
   var h = '<div style="margin-bottom:12px;">' +
-    '<div class="stitle" style="font-size:15px;margin-bottom:8px;">📔 Journal des Tâches &mdash; Registre Historique</div>' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">' +
+      '<div class="stitle" style="font-size:15px;margin-bottom:0;">📔 Journal des Tâches &mdash; Registre Historique</div>' +
+      '<div style="display:flex;gap:6px;align-items:center;">' +
+        '<button onclick="exportJournalXLSX()" title="Exporter les lignes visibles en fichier Excel" ' +
+          'style="background:#10b981;color:#fff;border:none;padding:5px 13px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.3px;white-space:nowrap;">📊 Export Excel</button>' +
+        '<button onclick="printJournal()" title="Imprimer le tableau courant" ' +
+          'style="background:var(--b5);color:#fff;border:none;padding:5px 11px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">🖨 Imprimer</button>' +
+      '</div>' +
+    '</div>' +
     // KPIs
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">' +
       '<div class="kcard" style="flex:1;min-width:110px;border-left:4px solid #3b82f6;"><div class="kv">' + total + '</div><div class="kl">Total tâches</div></div>' +
@@ -9876,7 +9796,7 @@ function renderJournal() {
 
   // Tableau
   h += '<div style="overflow-x:auto;">' +
-    '<table style="width:100%;border-collapse:collapse;font-size:10px;">' +
+    '<table id="journal-table" style="width:100%;border-collapse:collapse;font-size:10px;">' +
     '<thead><tr style="background:var(--b5);color:#fff;">' +
       '<th style="padding:6px;text-align:left;">Code</th>' +
       '<th style="padding:6px;text-align:left;">Famille</th>' +
@@ -9948,21 +9868,20 @@ function saveEquipDesc(eid, val) {
 function openEditEquip(eid) {
   var e = APP.equips.find(function(x){ return x.id === eid; });
   if (!e) return;
-  // Pré-remplir le formulaire d'ajout équipement
+  // Pré-remplir le formulaire d'ajout équipement (IDs réels du modal m-equip)
   var setVal = function(id, val) { var el = document.getElementById(id); if (el) el.value = val || ''; };
-  setVal('ne-code',     e.code    || '');
-  setVal('ne-famille',  e.famille || '');
-  setVal('ne-type',     e.type    || '');
-  setVal('ne-immat',    e.immat   || '');
-  setVal('ne-desc',     e.desc    || '');
-  setVal('ne-statut',   e.statut  || 'PANNE');
-  setVal('ne-pieces',   e.pieces  || '');
-  setVal('ne-priority', e.priority || '3');
+  setVal('ne-code',  e.code    || '');
+  setVal('ne-fam',   e.famille || '');
+  setVal('ne-type',  e.type    || '');
+  setVal('ne-immat', e.immat   || '');
+  setVal('ne-desc',  e.desc    || '');
+  setVal('ne-st',    e.statut  || 'PANNE');
+  setVal('ne-pri',   e.priority || '3');
   // Stocker l'ID en cours d'édition
   window._editEquipId = eid;
-  openM('m-eq');
+  openM('m-equip');
   // Adapter le titre du modal
-  var mTitle = document.querySelector('#m-eq .mt');
+  var mTitle = document.querySelector('#m-equip .mt');
   if (mTitle) mTitle.textContent = '✏ Modifier équipement — ' + e.code;
 }
 
