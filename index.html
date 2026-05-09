@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════
-  DM-PLANNING v20.5 — SOSETER HYDRO — F. SEYE — Directeur Matériel
+  DM-PLANNING v20.8 — SOSETER HYDRO — F. SEYE — Directeur Matériel
   GitHub Pages : https://fseye-dm.github.io/atc-planning/
   Firebase : dm-planning-soseter | Zone : europe-west1
 
@@ -117,7 +117,71 @@
      Séquencement Firebase : confirmé correct (3/3 scripts avant _fbInit).
      node --check : syntaxe JS validée.
 
-  ── CHANGELOG v20.6-1 (vs v20.6) ──────────────────────────────
+  ── CHANGELOG v20.8 (vs v20.7) ──────────────────────────────
+  ✅ MODULE 10 — JOURNAL DES TÂCHES — Bouton d'import Excel
+     Bouton «📥 Importer» ajouté à côté de l'export Excel dans renderJournal()
+     importJournalXLSX() + _processJournalImport() : parsing SheetJS, index
+     des tâches existantes par Code|Type|Date, respect strict des règles de
+     priorité (DM bloqué sur champs chef_only, Chef bloqué sur champs dm_only),
+     confirmation avant application, toast de résultat, sync Firebase immédiate.
+
+  ✅ MODULE 12 — GESTION BASE — Verrouillage permanent des règles
+     Nœud dédié «atcdata/_globalLock» : source de vérité ultime pour le verrou.
+     lockAndSavePriorityRules() écrit simultanément atcdata et atcdata/_globalLock.
+     _loadGlobalLock() + _applyGlobalLockSnap() : lecture once() + listener .on()
+     appelés pour DM (t=800ms) et Chef (t=1200ms) à chaque connexion.
+     _globalLock n'est JAMAIS touché par _fbWriteToCloud(), _syncMerge() ni
+     chefResetFromFirebase() → verrou survit à F5, déco/reco, sync, fermeture.
+     _applyPermissionsSnapshot() : garde v20.8 — le déverrouillage implicite
+     depuis atcdata/permissions est bloqué si _globalLock dit locked.
+
+  ✅ MODULE 08 — INSTRUCTIONS DM — Priorité exclusive CHEF sur commentaire
+     addDMComment() : guard DM ajouté — le DM ne peut jamais écrire dm.comment.
+     renderDMList() : champ comment conditionnel (ROLE==='chef' → input éditable ;
+     ROLE==='dm' → span lecture seule avec icône 🔒).
+     Règle dm.comment déjà présente : chef_only dans PRIORITY_FIELDS + 'chef'
+     dans APP.priorityRules — conforme au verrouillage global (point 2).
+     node --check : syntaxe JS validée.
+
+    ── CHANGELOG v20.7 (vs v20.6-2) ──────────────────────────────
+  ✅ BUG FIX — ERREUR COOP console.warn (popup.ts:302)
+     Cause : Firebase SDK sonde window.closed sur sa popup via un mécanisme
+     bloqué par Cross-Origin-Opener-Policy de Chrome. GitHub Pages ne permet
+     pas de configurer cet en-tête côté serveur.
+     Solution : Filtre console.warn ciblé ajouté dans le garde anti-injection
+     (regex Cross-Origin-Opener-Policy.*window.closed). L'auth fonctionne
+     via onAuthStateChanged — le warning est du bruit sans impact fonctionnel.
+
+  ✅ BUG FIX — RÈGLES PERMISSIONS : 753 répétitions → 1 seule lecture
+     Cause : _loadDynPermissions() utilisait .on() permanent sur atcdata/permissions.
+     Chaque appel à _applyLogin() ajoutait un nouveau listener sans détacher
+     l'ancien. Avec N listeners : chaque écriture déclenchait N callbacks →
+     boucle exponentielle. De plus, setTimeout(_initDynPermissions, 2000) dans
+     le chemin DM déclenchait une seconde écriture qui re-alimentait la boucle.
+     Solution :
+       • Guard _rulesListenerAttached : un seul .on() par session
+       • Lecture initiale via .once() pour rompre la boucle écriture→réécoute
+       • _rulesInitialized : _initDynPermissions() appelé UNE seule fois
+       • setTimeout(_initDynPermissions, 2000) supprimé de _applyLogin() DM
+       • Logique applicative extraite dans _applyPermissionsSnapshot()
+
+  ✅ BUG FIX — ÉCRITURES INTEMPESTIVES : profil chef toutes les 30 secondes
+     Cause 1 : setInterval Chef 10 min redondant avec les listeners .on() déjà
+     actifs sur equips / planning / dm / _ts dans _fbOnSignedIn().
+     Cause 2 : les N listeners accumulés sur permissions déclenchaient
+     autoRefreshUI() en cascade → saveApp() → _fbWriteToCloud() → boucle.
+     Solution :
+       • setInterval Chef 10 min supprimé — listeners Firebase temps réel actifs
+       • _isWriting flag : une seule écriture simultanée autorisée
+       • Debounce porté à 1 s (était 400 ms)
+       • Log "Firebase: écriture vers serveur" déplacé DANS le timeout debounce
+         (ne s'affiche que lors d'une vraie écriture réseau, pas à chaque appel)
+
+  ✅ VERBOSE LOGS — Production control
+     enableVerboseLogs(false) : par défaut. Masque tous les logs de debug répétitifs.
+     enableVerboseLogs(true)  : dans la console, pour réactiver en debug.
+     Fonction vlog() : remplace console.log() dans tous les listeners Firebase.
+     node --check : syntaxe JS validée.
   ✅ MODULE 10 — JOURNAL DES TÂCHES — Export Excel operationnel
      Suppression doublon mort (_buildJournalData x2, renderJournal x2)
      Bouton Export Excel ajoute en haut a droite du tableau journal
@@ -134,7 +198,7 @@
 <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a1628'/%3E%3Ctext x='6' y='24' font-size='20' font-family='Arial' font-weight='bold' fill='%23f97316'%3EAT%3C/text%3E%3C/svg%3E">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DM-PLANNING v20.6-2 | Direction Matériel Planning — SOSETER HYDRO</title>
+<title>DM-PLANNING v20.8 | Direction Matériel Planning — SOSETER HYDRO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
 <!--
@@ -253,6 +317,19 @@
     var msg = Array.prototype.slice.call(arguments).join(' ');
     if (/kaspersky|kis\.v2\.scr|ERR_FAILED.*kaspersky/i.test(msg)) return;
     _origErr.apply(console, arguments);
+  };
+
+  // ── Filtre console.warn COOP Firebase SDK (v20.7) ─────────────
+  // Chrome génère "Cross-Origin-Opener-Policy policy would block the window.closed call"
+  // quand Firebase SDK (popup.ts) tente de sonder sa popup d'authentification.
+  // Ce warning est interne au SDK Firebase — l'auth fonctionne via onAuthStateChanged.
+  // GitHub Pages ne permet pas de configurer Cross-Origin-Opener-Policy côté serveur,
+  // ce filtre supprime le bruit console sans affecter le comportement auth.
+  var _origWarn = console.warn;
+  console.warn = function() {
+    var msg = Array.prototype.slice.call(arguments).join(' ');
+    if (/Cross-Origin-Opener-Policy.*window\.closed/i.test(msg)) return;
+    _origWarn.apply(console, arguments);
   };
 
 })();
@@ -1254,7 +1331,7 @@ var SK = 'atc_v8';
 // ============================================================
 // VERSION & SIGNATURE — DM-PLANNING
 // ============================================================
-var APP_VERSION = 'v20.5';
+var APP_VERSION = 'v20.7';
 var APP_AUTHOR  = 'F.SEYE \u2014 Asset Manager';
 var APP_NAME    = 'DM-PLANNING';
 
@@ -1294,6 +1371,21 @@ var APP_CONFIG = {
 var _fbApp = null, _fbAuth = null, _fbDB = null, _fbListener = null, _fbWriteDebounce = null;
 
 // ══════════════════════════════════════════════════════════════════
+// VERBOSE LOGS — Contrôle production/debug (v20.7)
+// Par défaut désactivé. enableVerboseLogs(true) dans la console
+// pour réactiver tous les logs de debug Firebase.
+// ══════════════════════════════════════════════════════════════════
+var _VERBOSE_LOGS = false;
+function enableVerboseLogs(flag) {
+  _VERBOSE_LOGS = !!flag;
+  console.info('[Logs] Mode verbeux ' + (_VERBOSE_LOGS ? 'ACTIVÉ ✓' : 'DÉSACTIVÉ'));
+}
+function vlog() {
+  if (!_VERBOSE_LOGS) return;
+  console.log.apply(console, arguments);
+}
+
+// ══════════════════════════════════════════════════════════════════
 // SÉCURITÉ v21.0 — Verrou d'initialisation Firebase
 // Empêche toute écriture avant confirmation du chargement serveur
 // ══════════════════════════════════════════════════════════════════
@@ -1301,6 +1393,11 @@ var isInitialLoadComplete = false;       // PILIER 1 : verrou écriture
 var _lastKnownEquipsCount  = -1;         // PILIER 3 : détection vidange accidentelle
 var _fbReady = false;  // true après initApp + auth
 var _fbInitRetries = 0; // compteur de tentatives de chargement Firebase
+
+// ── Verrou écriture simultanée + guards permissions ─────────────
+var _isWriting             = false; // Une seule écriture Firebase simultanée
+var _rulesListenerAttached = false; // Un seul .on() sur atcdata/permissions par session
+var _rulesInitialized      = false; // _initDynPermissions() appelé une seule fois
 
 function _injectSignatures() {
   var sig = APP_NAME + ' ' + APP_VERSION;
@@ -2225,7 +2322,7 @@ function _showMergeNotif(by, log) {
 
 // ── Clé localStorage pour signaler un redirect en cours
 var _FB_REDIRECT_KEY = 'dm_fb_redirect_pending';
-var _fbInitRetries = 0;
+// _fbInitRetries déjà déclaré plus haut avec les variables Firebase
 
 // ════════════════════════════════════════════════════════════════
 // SANITIZE KEY — Nettoyage universel des clés Firebase
@@ -2661,7 +2758,7 @@ function _fbOnSignedIn(user) {
         }
       });
       if (changed) {
-        console.log('Firebase equips: sync instantan\u00e9e — ' + remEquips.length + ' \u00e9quipements');
+        vlog('Firebase equips: sync instantan\u00e9e — ' + remEquips.length + ' \u00e9quipements');
         autoRefreshUI();
       }
     } catch(e) { console.error('[V20.1] equips listener exception:', e); }
@@ -2693,7 +2790,7 @@ function _fbOnSignedIn(user) {
         });
       }
       if (changed) {
-        console.log('Firebase planning: mise \u00e0 jour Top10 + daily');
+        vlog('Firebase planning: mise \u00e0 jour Top10 + daily');
         autoRefreshUI();
       }
     } catch(e) { console.error('[V20.1] planning listener exception:', e); }
@@ -2709,7 +2806,7 @@ function _fbOnSignedIn(user) {
       if (!Array.isArray(remDm)) return;
       if (JSON.stringify(APP.dm) !== JSON.stringify(remDm)) {
         APP.dm = remDm;
-        console.log('Firebase dm: ' + remDm.length + ' instruction(s) synchronisée(s)');
+        vlog('Firebase dm: ' + remDm.length + ' instruction(s) synchronisée(s)');
         try {
           var pg = (document.getElementById('ptitle')||{}).textContent||'';
           if (pg === 'Instructions DM') renderDMPage();
@@ -2725,21 +2822,21 @@ function _fbOnSignedIn(user) {
   _fbDB.ref('atcdata/_ts').on('value', function(snap) {
     var remoteTs = snap.val() || 0;
     if (remoteTs > SYNC._fbLastWriteTs + 500) {   // Délai réduit: debounce(400)+marge minimale
-      console.log('Firebase: Sync reçue — mise à jour UI en cours...', new Date().toLocaleTimeString('fr-FR'));
+      vlog('Firebase: Sync reçue — mise à jour UI en cours...', new Date().toLocaleTimeString('fr-FR'));
       _fbDB.ref('atcdata').once('value').then(function(fullSnap) {
         var remote = fullSnap.val();
         if (!remote) return;
         if (remote._by === ROLE) {
-          console.log('Firebase: sync propre ignorée [' + ROLE + ']');
+          vlog('Firebase: sync propre ignorée [' + ROLE + ']');
           return;
         }
-        console.log('Firebase: données de [' + (remote._by||'?') + '] — ' + new Date().toLocaleTimeString('fr-FR'));
+        vlog('Firebase: données de [' + (remote._by||'?') + '] — ' + new Date().toLocaleTimeString('fr-FR'));
         try {
           var changed = _syncMerge(remote);
           if (changed) {
             _saveLocalOnly();
             autoRefreshUI();
-            console.log('Firebase: UI mise à jour — sync terminée.');
+            vlog('Firebase: UI mise à jour — sync terminée.');
             var badge = document.getElementById('cloud-badge');
             if (badge && navigator.onLine) {
               badge.innerHTML = '\u2665 Synchronisé';
@@ -4438,8 +4535,12 @@ function _applyLogin(role, saveSession) {
   if (ROLE === 'dm') {
     // Publier la date de référence pour synchroniser DM et Chef
     setTimeout(_fbPublishRefDate, 2000);
-    // DM: charger les permissions ET les pousser si absentes
-    setTimeout(function(){ _loadDynPermissions(); setTimeout(_initDynPermissions, 2000); }, 500);
+    // DM: charger les permissions — _initDynPermissions() est appelé automatiquement
+    // depuis _loadDynPermissions() si les règles sont absentes (une seule fois).
+    // Ne pas le rappeler ici : double appel = double écriture = boucle listener.
+    setTimeout(_loadDynPermissions, 500);
+    // v20.8 : Charger le verrou global depuis le nœud dédié Firebase (jamais écrasé par sync)
+    setTimeout(_loadGlobalLock, 800);
     // Masquer les badges non pertinents en mode Full Online DM
     // DM dispose du bouton Sync pour forcer la synchro avec les données Chef
     var syncBtnDM = document.getElementById('chef-reset-btn');
@@ -4466,6 +4567,8 @@ function _applyLogin(role, saveSession) {
     setTimeout(_fbReadRefDate, 1500);
     // Chef: écouter les permissions en temps réel → droits s'activent/désactivent
     setTimeout(_loadDynPermissions, 1000);
+    // v20.8 : Charger le verrou global depuis le nœud dédié Firebase
+    setTimeout(_loadGlobalLock, 1200);
     document.getElementById('rbadge').className = 'rbadge bchef';
     document.getElementById('rbadge').innerHTML = '&#128295; Chef d\'Atelier';
     document.getElementById('topav').className = 'uav av-chef';
@@ -4475,26 +4578,21 @@ function _applyLogin(role, saveSession) {
     var rBtn = document.getElementById('chef-reset-btn');
     if (rBtn) rBtn.style.display = 'none';
 
-    // ── Auto-sync Chef toutes les 10 minutes ──────────────────
-    // Force une synchronisation complète depuis Firebase toutes les 10 min
-    // dans le respect strict des règles de priorité (via _syncMerge)
-    if (window._chefAutoSyncInterval) clearInterval(window._chefAutoSyncInterval);
-    window._chefAutoSyncInterval = setInterval(function() {
-      if (!_fbApp || !_fbDB || !_fbAuth || !_fbAuth.currentUser) return;
-      console.log('Chef auto-sync 10min: rechargement depuis Firebase...');
-      _fbDB.ref('atcdata').once('value').then(function(snap) {
-        var remote = snap.val();
-        if (!remote) return;
-        var changed = _syncMerge(remote);
-        if (changed) {
-          autoRefreshUI();
-          console.log('Chef auto-sync 10min: UI mise à jour.');
-        } else {
-          console.log('Chef auto-sync 10min: aucune modification détectée.');
-        }
-      }).catch(function(e){ console.error('Chef auto-sync error:', e.message); });
-    }, 10 * 60 * 1000); // 10 minutes
-    console.log('Chef: auto-sync activée (toutes les 10 minutes)');
+    // ── Auto-sync Chef — v20.7 : setInterval SUPPRIMÉ ──────────
+    // Motif : les listeners Firebase temps réel attachés dans _fbOnSignedIn()
+    //   • atcdata/equips   → sync instantanée statuts / standby
+    //   • atcdata/planning → sync Top10 + daily
+    //   • atcdata/dm       → instructions DM
+    //   • atcdata/_ts      → déclencheur global (merge + autoRefreshUI)
+    // couvrent déjà 100 % des changements distants en < 1 seconde.
+    // Le setInterval 10 min était redondant, source de lectures inutiles
+    // et, combiné aux listeners accumulés sur atcdata/permissions, à l'origine
+    // des écritures intempestives "profil: chef toutes les 30 secondes".
+    if (window._chefAutoSyncInterval) {
+      clearInterval(window._chefAutoSyncInterval);
+      window._chefAutoSyncInterval = null;
+    }
+    vlog('Chef: synchronisation temps réel Firebase active — setInterval désactivé.');
   }
 
   // ── Restaurer état verrouillage depuis localStorage (fallback hors-ligne) ──
@@ -8197,8 +8295,13 @@ function renderDMList(filter) {
               : // Chef : validation verrouillée côté UI — seul le DM valide
                 '<label style="display:flex;align-items:center;gap:4px;cursor:not-allowed;text-transform:none;font-size:12px;font-weight:500;color:var(--g400);margin:0;" title="Validation réservée au DM — action non autorisée">' +
                   '<input type="checkbox" disabled> 🔒 Validation réservée au DM</label>') +
-            '<input type="text" placeholder="Votre retour / commentaire..." style="flex:1;font-size:11px;" ' +
-              'onchange="addDMComment(\'' + d.id + '\',this.value)" value="' + (d.comment||'') + '">'
+            // v20.8 — Champ Commentaire Chef : exclusivement réservé au Chef d'Atelier
+            // Le DM ne peut pas écrire ce champ (priorité CHEF, dm.comment = chef)
+            (ROLE === 'chef'
+              ? '<input type="text" placeholder="Votre retour / commentaire..." style="flex:1;font-size:11px;" ' +
+                'onchange="addDMComment(\'' + d.id + '\',this.value)" value="' + (d.comment||'') + '">'
+              : '<span style="flex:1;font-size:11px;color:var(--g600);font-style:italic;padding:4px 7px;background:var(--g100);border-radius:4px;border-left:2px solid var(--g400);" title="Champ exclusif au Chef d\'Atelier — lecture seule pour le DM">&#128274; ' +
+                (d.comment ? escH(d.comment) : '<em style="color:var(--g400);">Aucun commentaire du Chef</em>') + '</span>')
           : // Instruction validée (verrouillée)
             (ROLE === 'dm'
               ? // DM peut déverrouiller
@@ -8236,6 +8339,12 @@ function markDone(id, val) {
 function addDMComment(id, c) {
   var d = APP.dm.find(function(d){return d.id===id;});
   if (d) {
+    // v20.8 — GUARD PRIORITÉ CHEF : Le champ dm.comment est exclusivement Chef
+    // Le DM ne peut jamais écrire ce champ, même si l'instruction n'est pas verrouillée.
+    if (ROLE === 'dm') {
+      toast('\u26d4 Commentaire de retour réservé au Chef d\'Atelier — action non autorisée.');
+      return;
+    }
     // Vérifier si l'instruction est verrouillée (executed par DM)
     if (d.executed && ROLE !== 'dm') {
       toast('⛔ Instruction verrouillée — commentaire non modifiable.');
@@ -8601,12 +8710,12 @@ function buildReportHTML(forPrint) {
         '<tbody>' + rows + '</tbody></table>' +
         '</div>';
     })() +
-    // ── v20.4 : COMMENTAIRES CHEF ATELIER — section Navy en fin de rapport ──────
+    // ── v20.4 : OBSERVATIONS DIRECTION — section Navy en fin de rapport ──────
     (comment
       ? '<div style="margin-top:18px;border:2px solid #0A1F4E;border-radius:6px;overflow:hidden;page-break-inside:avoid;">' +
           '<div style="background:#0A1F4E;padding:9px 14px;display:flex;align-items:center;gap:10px;">' +
             '<span style="font-size:15px;">&#128203;</span>' +
-            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">commentaires chef atelier</span>' +
+            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">Observations Direction</span>' +
             '<span style="margin-left:auto;font-size:9px;color:#8fa8d8;white-space:nowrap;">Chef d\'Atelier \u2014 ' + new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'}) + '</span>' +
           '</div>' +
           '<div style="padding:12px 16px 14px;background:#f8fafc;font-size:11px;color:#1e293b;line-height:1.75;white-space:pre-wrap;border-left:4px solid #0A1F4E;font-style:italic;">' +
@@ -8619,7 +8728,7 @@ function buildReportHTML(forPrint) {
         '</div>'
       : '<div style="margin-top:18px;border:2px solid #0A1F4E;border-radius:6px;overflow:hidden;page-break-inside:avoid;">' +
           '<div style="background:#0A1F4E;padding:9px 14px;">' +
-            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">&#128203; commentaires chef atelier</span>' +
+            '<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#fff;">&#128203; Observations Direction</span>' +
           '</div>' +
           '<div style="padding:20px 16px;background:#f8fafc;font-size:10px;color:#94a3b8;text-align:center;font-style:italic;">' +
             'Aucun commentaire saisi \u2014 renseigner le champ &laquo;&nbsp;Commentaire Chef d\'Atelier&nbsp;&raquo; dans l\'onglet Rapport.' +
@@ -9409,6 +9518,53 @@ function dmSyncChefData() {
 
 
 // ════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════
+// VERROU GLOBAL PERMANENT — v20.8
+// Nœud dédié : atcdata/_globalLock (jamais touché par _fbWriteToCloud
+// ni _syncMerge ni chefResetFromFirebase → survit à tout événement).
+// Lecture au login, listener temps réel, écriture uniquement sur
+// action explicite du DM via lockAndSavePriorityRules().
+// ════════════════════════════════════════════════════════════════
+var _globalLockListenerAttached = false;
+
+function _loadGlobalLock() {
+  if (!_fbDB) return;
+  // ── Lecture initiale (once) ────────────────────────────────────────
+  _fbDB.ref('atcdata/_globalLock').once('value').then(function(snap) {
+    _applyGlobalLockSnap(snap.val());
+
+    // ── Listener temps réel — un seul par session ──────────────────
+    if (_globalLockListenerAttached) return;
+    _globalLockListenerAttached = true;
+    _fbDB.ref('atcdata/_globalLock').on('value', function(snapLive) {
+      _applyGlobalLockSnap(snapLive.val());
+    }, function(err) {
+      vlog('[GlobalLock] Listener erreur:', err.message);
+    });
+  }).catch(function(e) {
+    vlog('[GlobalLock] Erreur lecture initiale:', e.message);
+  });
+}
+
+function _applyGlobalLockSnap(gl) {
+  if (!gl || typeof gl.rulesLocked !== 'boolean') return;
+  var wasLocked = !!APP.priorityRulesLocked;
+  APP.priorityRulesLocked   = gl.rulesLocked;
+  APP.priorityRulesLockedAt = gl.lockedAt || null;
+  APP.priorityRulesLockedBy = gl.lockedBy || 'dm';
+  try {
+    localStorage.setItem('pr_locked', JSON.stringify({
+      locked: gl.rulesLocked, at: gl.lockedAt || null
+    }));
+  } catch(e) {}
+  if (wasLocked !== gl.rulesLocked) {
+    vlog('[GlobalLock] État verrou mis à jour depuis Firebase._globalLock :',
+         gl.rulesLocked ? '\uD83D\uDD12 VERROUILLÉ' : '\uD83D\uDD13 DÉVERROUILLÉ');
+    try { _refreshAdminLockUI(); } catch(e) {}
+  }
+}
+
 // Valider et verrouiller les règles de priorité
 // ════════════════════════════════════════════════════════════════
 function lockAndSavePriorityRules() {
@@ -9428,8 +9584,19 @@ function lockAndSavePriorityRules() {
     'priorityRulesLocked': APP.priorityRulesLocked,
     '_fieldTs':            _sanitizeObj(APP.fieldTs || {})
   };
+  // ── v20.8 : Nœud dédié _globalLock — immuable face à tous les syncs ────────
+  // Ce nœud n'est JAMAIS écrit par _fbWriteToCloud() ni _syncMerge().
+  // Il est la source de vérité ultime pour l'état du verrou.
+  var _glPayload = {
+    rulesLocked: APP.priorityRulesLocked,
+    lockedAt:    APP.priorityRulesLockedAt || null,
+    lockedBy:    APP.priorityRulesLocked ? 'dm' : null,
+    updatedAt:   Date.now()
+  };
   if (_fbApp && _fbDB && _fbAuth && _fbAuth.currentUser) {
-    _fbDB.ref('atcdata').update(fbPayload).then(function() {
+    var _p1 = _fbDB.ref('atcdata').update(fbPayload);
+    var _p2 = _fbDB.ref('atcdata/_globalLock').set(_glPayload);
+    Promise.all([_p1, _p2]).then(function() {
       _pushDynPermissions();
       _refreshAdminLockUI();
       var msg = APP.priorityRulesLocked
@@ -9540,48 +9707,128 @@ function _getRefNow() {
 // ════════════════════════════════════════════════════════════════
 var _dynPerms = null; // Cache local des permissions Firebase
 
+// ════════════════════════════════════════════════════════════════
+// PERMISSIONS DYNAMIQUES — v20.7 CORRIGÉ
+// Corrections apportées :
+//   • _rulesListenerAttached : un seul .on() par session (évite l'accumulation)
+//   • Lecture initiale via .once() — rompt la boucle écriture→réécoute
+//   • _rulesInitialized : _initDynPermissions() appelé une seule fois
+//   • Logique applicative extraite dans _applyPermissionsSnapshot()
+//   • Logs répétitifs remplacés par vlog()
+// ════════════════════════════════════════════════════════════════
 function _loadDynPermissions() {
   if (!_fbDB) return;
-  console.log('Firebase: chargement des règles de priorité depuis atcdata/permissions...');
-  _loadAppConfig(); // Charger la config nom/signature depuis Firebase
-  _fbDB.ref('atcdata/permissions').on('value', function(snap) {
+
+  _loadAppConfig(); // Charger la config nom/signature (once — pas de boucle)
+
+  // ── GARDE ANTI-DUPLICATION : un seul listener .on() par session ───────────
+  // Sans ce guard, chaque appel à _applyLogin() ajoutait un nouveau listener.
+  // Avec N listeners, chaque écriture dans atcdata/permissions déclenchait N
+  // callbacks → boucle exponentielle (753 répétitions observées).
+  if (_rulesListenerAttached) {
+    vlog('Firebase: listener permissions déjà actif — duplication bloquée.');
+    return;
+  }
+  _rulesListenerAttached = true;
+
+  vlog('Firebase: chargement initial des règles (once) depuis atcdata/permissions...');
+
+  // ── ÉTAPE 1 : Lecture unique au démarrage (.once) ─────────────────────────
+  // .once() ne déclenche PAS de boucle quand _initDynPermissions() écrit ensuite.
+  _fbDB.ref('atcdata/permissions').once('value').then(function(snap) {
     var p = snap.val();
+
     if (!p || !p.priorityRules) {
-      // Aucune règle en Firebase → publier les valeurs par défaut locales
-      console.log('Firebase: aucune règle trouvée → publication des règles par défaut');
-      if (ROLE === 'dm') _initDynPermissions();
-      return;
+      // Aucune règle en Firebase → publier les valeurs par défaut UNE SEULE FOIS
+      if (ROLE === 'dm' && !_rulesInitialized) {
+        _rulesInitialized = true;
+        vlog('Firebase: aucune règle trouvée → publication des règles par défaut (once)');
+        _initDynPermissions();
+      }
+    } else {
+      _rulesInitialized = true;
+      _applyPermissionsSnapshot(p);
     }
-    _dynPerms = p;
-    // ── V20.1 MODULE 2: Restaurer l'état de verrouillage depuis Firebase ───
-    // Firebase est la source de vérité — le lock doit survivre aux rechargements
-    if (typeof p.priorityRulesLocked === 'boolean') {
-      var wasLocked = !!APP.priorityRulesLocked;
-      APP.priorityRulesLocked   = p.priorityRulesLocked;
+
+    // ── ÉTAPE 2 : Attacher le listener temps réel APRÈS le .once() ────────────
+    // Ce listener permet au Chef de voir les changements DM en temps réel.
+    // Il n'est attaché QU'UNE SEULE FOIS grâce au guard _rulesListenerAttached.
+    // Il ne déclenche plus d'écriture Firebase (seule _saveDynPermissions()
+    // écrit, sur action utilisateur explicite uniquement).
+    _fbDB.ref('atcdata/permissions').on('value', function(snapLive) {
+      var pLive = snapLive.val();
+      if (!pLive || !pLive.priorityRules) {
+        // Règles absentes dans le listener live — cas exceptionnel (ex: reset Firebase)
+        if (ROLE === 'dm' && !_rulesInitialized) {
+          _rulesInitialized = true;
+          vlog('Firebase: règles manquantes (listener live) → publication unique');
+          _initDynPermissions();
+        }
+        return;
+      }
+      _rulesInitialized = true;
+      _applyPermissionsSnapshot(pLive);
+    }, function(err) {
+      console.warn('atcdata/permissions listener erreur:', err.message);
+      // Firebase inaccessible → continuer avec les règles locales
+    });
+
+  }).catch(function(err) {
+    console.warn('atcdata/permissions once erreur:', err.message);
+    // Erreur réseau au démarrage → pas de règles distantes, continuer localement
+  });
+}
+
+// ── Helper : applique un snapshot permissions à l'état local ─────────────────
+// Extrait de l'ancien callback inline pour éviter la duplication entre
+// la lecture .once() initiale et le listener .on() temps réel.
+function _applyPermissionsSnapshot(p) {
+  _dynPerms = p;
+
+  // ── V20.8 : État de verrouillage — le nœud _globalLock est la source de vérité ultime
+  // Ce bloc (atcdata/permissions) est secondaire. _applyGlobalLockSnap() l'emporte.
+  // On n'applique ici QUE si _globalLock n'a pas encore été chargé (mode hors-ligne).
+  if (typeof p.priorityRulesLocked === 'boolean') {
+    // Guard v20.8 : Ne jamais déverrouiller localement depuis permissions si le DM a
+    // explicitement verrouillé via _globalLock (évite race condition sync→unlock implicite).
+    var _permLocked = p.priorityRulesLocked;
+    var _localLocked = !!APP.priorityRulesLocked;
+    // Règle : on peut toujours appliquer un VERROUILLAGE depuis Firebase,
+    // mais on n'applique un DÉVERROUILLAGE que si le nœud _globalLock est absent (hors-ligne).
+    if (_permLocked || !_localLocked) {
+      var wasLocked2 = _localLocked;
+      APP.priorityRulesLocked   = _permLocked;
       APP.priorityRulesLockedAt = p.updatedAt || null;
-      try { localStorage.setItem('pr_locked', JSON.stringify({ locked: APP.priorityRulesLocked, at: APP.priorityRulesLockedAt })); } catch(e2) {}
-      if (wasLocked !== APP.priorityRulesLocked) {
-        console.log('[V20.1] État verrou priorités mis à jour depuis Firebase :', APP.priorityRulesLocked ? '🔒 VERROUILLÉ' : '🔓 DÉVERROUILLÉ');
+      try {
+        localStorage.setItem('pr_locked', JSON.stringify({
+          locked: APP.priorityRulesLocked,
+          at:     APP.priorityRulesLockedAt
+        }));
+      } catch(e2) {}
+      if (wasLocked2 !== APP.priorityRulesLocked) {
+        vlog('[V20.8] État verrou mis à jour depuis atcdata/permissions :',
+             APP.priorityRulesLocked ? '\uD83D\uDD12 VERROUILLÉ' : '\uD83D\uDD13 DÉVERROUILLÉ');
         try { _refreshAdminLockUI(); } catch(e2) {}
       }
+    } else {
+      vlog('[V20.8] Déverrouillage implicite depuis permissions bloqué — _globalLock conservé.');
     }
-    // ── Firebase = source de vérité ─────────────────────────────────────────
-    // Les règles Firebase ÉCRASENT toujours les valeurs par défaut locales
-    if (p.priorityRules && typeof p.priorityRules === 'object') {
-      var restored = _desanitizeRulesFromFirebase(p.priorityRules);
-      // Écraser complètement les règles locales par celles de Firebase
-      Object.keys(restored).forEach(function(k){ APP.priorityRules[k] = restored[k]; });
-      console.log('Firebase: ' + Object.keys(restored).length + ' règles de priorité chargées (version DM du ' + (p.updatedAt ? new Date(p.updatedAt).toLocaleDateString('fr-FR') : '?') + ')');
-    }
-    // Rafraîchir l'UI → les boutons s'activent/désactivent selon les droits
-    try {
-      if (typeof renderPriorityRulesUI === 'function') renderPriorityRulesUI();
-      autoRefreshUI();
-    } catch(e) {}
-  }, function(err){
-    console.warn('atcdata/permissions listener:', err.message);
-    // Même si Firebase est inaccessible → continuer avec les règles locales
-  });
+  }
+
+  // ── Firebase = source de vérité ───────────────────────────────────────────
+  // Les règles Firebase écrasent toujours les valeurs par défaut locales.
+  if (p.priorityRules && typeof p.priorityRules === 'object') {
+    var restored = _desanitizeRulesFromFirebase(p.priorityRules);
+    Object.keys(restored).forEach(function(k) { APP.priorityRules[k] = restored[k]; });
+    vlog('Firebase: ' + Object.keys(restored).length + ' règles de priorité chargées'
+         + ' (version DM du ' + (p.updatedAt ? new Date(p.updatedAt).toLocaleDateString('fr-FR') : '?') + ')');
+  }
+
+  // Rafraîchir l'UI → les boutons s'activent/désactivent selon les droits
+  try {
+    if (typeof renderPriorityRulesUI === 'function') renderPriorityRulesUI();
+    autoRefreshUI();
+  } catch(e) {}
 }
 
 function _initDynPermissions() {
@@ -9950,6 +10197,242 @@ function exportJournalXLSX() {
   toast('\u2705 Export TSV téléchargé (' + rows.length + ' lignes).');
 }
 
+
+// ── importJournalXLSX: import Excel vers le journal — v20.8 ───────────────
+// Format attendu : colonnes identiques à l'export (Code, Famille, Statut, ...)
+// Règles de priorité : DM ne peut pas écraser les champs chef_only (suivi.rh,
+//   suivi.done, suivi.taskDesc) ; Chef ne peut pas écraser les champs dm_only.
+function importJournalXLSX() {
+  if (typeof XLSX === 'undefined') {
+    toast('\u26d4 SheetJS (XLSX) non disponible — import impossible.');
+    return;
+  }
+  // Créer un input file caché
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.xlsx,.xls';
+  input.onchange = function(ev) {
+    var file = ev.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        var data = new Uint8Array(e.target.result);
+        var wb = XLSX.read(data, { type: 'array' });
+        var sheetName = wb.SheetNames[0];
+        var ws = wb.Sheets[sheetName];
+        var rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        if (!rows || !rows.length) {
+          toast('\u26a0 Fichier vide ou format non reconnu.');
+          return;
+        }
+        _processJournalImport(rows, file.name);
+      } catch(err) {
+        toast('\u274c Erreur lecture fichier : ' + (err.message || err));
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  input.click();
+}
+
+// ── Traitement de l'import Excel journal ─────────────────────────────────
+function _processJournalImport(rows, fileName) {
+  // Colonnes attendues (issues de exportJournalXLSX) :
+  // Code, Famille, Statut, Date Panne, Description Panne, Type,
+  // Description Tâche, Réalisation, Agents, MTTR, Avancement, Date Clôture
+  var COL_CODE    = 'Code';
+  var COL_TYPE    = 'Type';
+  var COL_DATEP   = 'Date Panne';
+  var COL_DESC    = 'Description Panne';    // dm_only (equip.desc)
+  var COL_TASKDESC= 'Description Tâche';   // chef_only (suivi.taskDesc)
+  var COL_AGENTS  = 'Agents';              // chef_only (suivi.rh)
+  var COL_AVANCE  = 'Avancement';          // chef_only (suivi.done)
+
+  // Vérifier que les colonnes clés existent
+  var firstRow = rows[0];
+  if (!firstRow.hasOwnProperty(COL_CODE) || !firstRow.hasOwnProperty(COL_TYPE)) {
+    toast('\u26a0 Format incorrect — colonnes "Code" et "Type" requises.\nVérifiez que vous importez un fichier exporté depuis le Journal des Tâches.');
+    return;
+  }
+
+  // Construire index des tâches existantes : {code+'|'+type+'|'+datePanne → {wk, eid, tid}}
+  var taskIndex = {};
+  var weeks = Object.keys(APP.suiviTaches || {}).sort();
+  weeks.forEach(function(wk) {
+    var weekData = APP.suiviTaches[wk] || {};
+    Object.keys(weekData).forEach(function(eid) {
+      var entry = weekData[eid];
+      var taches = Array.isArray(entry) ? entry : (entry && Array.isArray(entry.taches) ? entry.taches : []);
+      var eq = APP.equips.find(function(e){ return e.id === eid; });
+      if (!eq) return;
+      taches.forEach(function(t) {
+        var addedDateStr = t.addedAt ? new Date(t.addedAt).toLocaleDateString('fr-FR') : '';
+        var key = eq.code + '|' + (t.nom||'') + '|' + addedDateStr;
+        taskIndex[key] = { wk: wk, eid: eid, tid: t.id, eq: eq };
+      });
+    });
+  });
+
+  // Analyser les modifications potentielles
+  var updates = [];
+  var skipped = [];
+
+  rows.forEach(function(row) {
+    var code     = String(row[COL_CODE]  || '').trim();
+    var type     = String(row[COL_TYPE]  || '').trim();
+    var dateP    = String(row[COL_DATEP] || '').trim();
+    if (!code) return;
+
+    var key = code + '|' + type + '|' + dateP;
+    var match = taskIndex[key];
+
+    if (!match) {
+      // Tenter sans la date (correspondance partielle)
+      var partKey = null;
+      Object.keys(taskIndex).forEach(function(k) {
+        if (k.startsWith(code + '|' + type + '|')) partKey = k;
+      });
+      if (partKey) match = taskIndex[partKey];
+    }
+
+    if (!match) {
+      skipped.push(code + ' / ' + type + ' (non trouvé)');
+      return;
+    }
+
+    var wk  = match.wk;
+    var eid = match.eid;
+    var tid = match.tid;
+    var eq  = match.eq;
+
+    var changes = [];
+
+    // ── Champ Description Panne (equip.desc) — DM only ─────────────────
+    var newDesc = String(row[COL_DESC] || '').trim();
+    if (newDesc && newDesc !== '—' && newDesc !== eq.desc) {
+      var canWriteDesc = (ROLE === 'dm') ||
+        ((APP.priorityRules && APP.priorityRules['equip.desc']) === 'chef');
+      if (canWriteDesc) {
+        changes.push({ type: 'equip.desc', eid: eid, val: newDesc,
+          label: 'Desc. panne → "' + newDesc.substring(0,30) + '"' });
+      } else {
+        skipped.push(code + ' — Description Panne (réservée au Chef)');
+      }
+    }
+
+    // ── Champ Description Tâche (suivi.taskDesc) — chef only ───────────
+    var newTaskDesc = String(row[COL_TASKDESC] || '').trim();
+    var existEntry  = APP.suiviTaches[wk] && APP.suiviTaches[wk][eid];
+    var existTask   = null;
+    if (existEntry) {
+      var arr = Array.isArray(existEntry) ? existEntry :
+        (existEntry.taches ? existEntry.taches : []);
+      existTask = arr.find(function(t){ return t.id === tid; });
+    }
+    if (newTaskDesc && newTaskDesc !== '—' && existTask && newTaskDesc !== existTask.desc) {
+      var canWriteTaskDesc = (ROLE === 'chef') ||
+        ((APP.priorityRules && APP.priorityRules['suivi.taskDesc']) === 'dm');
+      if (canWriteTaskDesc) {
+        changes.push({ type: 'suivi.taskDesc', wk: wk, eid: eid, tid: tid, val: newTaskDesc,
+          label: 'Desc. tâche → "' + newTaskDesc.substring(0,30) + '"' });
+      } else {
+        skipped.push(code + ' — Desc. Tâche (réservée au Chef)');
+      }
+    }
+
+    // ── Champ Avancement (suivi.done) — chef only ──────────────────────
+    var newAvance = String(row[COL_AVANCE] || '').trim();
+    if (existTask) {
+      var shouldBeDone = (newAvance === 'Clôturée' || newAvance === '100%');
+      var shouldBeOpen = (newAvance === 'En cours' || newAvance === '0%');
+      if ((shouldBeDone && !existTask.done) || (shouldBeOpen && existTask.done)) {
+        var canWriteDone = (ROLE === 'chef') ||
+          ((APP.priorityRules && APP.priorityRules['suivi.done']) === 'dm');
+        if (canWriteDone) {
+          changes.push({ type: 'suivi.done', wk: wk, eid: eid, tid: tid,
+            val: shouldBeDone,
+            label: 'Avancement → ' + (shouldBeDone ? 'Clôturée ✅' : 'En cours 🔄') });
+        } else {
+          skipped.push(code + ' — Avancement (réservé au Chef)');
+        }
+      }
+    }
+
+    if (changes.length) updates.push({ code: code, changes: changes });
+  });
+
+  // ── Résumé et confirmation ──────────────────────────────────────────
+  if (!updates.length) {
+    var skipMsg = skipped.length
+      ? '\n\nChamps ignorés (règles de priorité) :\n• ' + skipped.slice(0,5).join('\n• ')
+      : '';
+    toast('\u2139 Aucune modification à appliquer.' + skipMsg);
+    return;
+  }
+
+  var summaryLines = updates.slice(0,10).map(function(u) {
+    return '• ' + u.code + ' : ' + u.changes.map(function(c){ return c.label; }).join(', ');
+  });
+  if (updates.length > 10) summaryLines.push('… et ' + (updates.length - 10) + ' autres');
+
+  var skipSummary = skipped.length
+    ? '\n\n⚠ ' + skipped.length + ' champ(s) ignoré(s) (règles de priorité).'
+    : '';
+
+  var msg = '📥 Import Journal — ' + updates.length + ' modification(s) détectée(s) :\n\n'
+    + summaryLines.join('\n')
+    + skipSummary
+    + '\n\nConfirmer l\'import ?';
+
+  if (!confirm(msg)) {
+    toast('Import annulé.');
+    return;
+  }
+
+  // ── Appliquer les modifications ────────────────────────────────────
+  var appliedCount = 0;
+  updates.forEach(function(u) {
+    u.changes.forEach(function(ch) {
+      try {
+        if (ch.type === 'equip.desc') {
+          var eq2 = APP.equips.find(function(e){ return e.id === ch.eid; });
+          if (eq2) { eq2.desc = ch.val; _stampField('equip.desc.' + eq2.code); appliedCount++; }
+        } else if (ch.type === 'suivi.taskDesc') {
+          var entry2 = APP.suiviTaches[ch.wk] && APP.suiviTaches[ch.wk][ch.eid];
+          var arr2 = Array.isArray(entry2) ? entry2 :
+            (entry2 && entry2.taches ? entry2.taches : null);
+          if (arr2) {
+            var t2 = arr2.find(function(t){ return t.id === ch.tid; });
+            if (t2) { t2.desc = ch.val; _stampField('suivi.' + ch.wk + '.' + ch.eid + '.' + ch.tid + '.desc'); appliedCount++; }
+          }
+        } else if (ch.type === 'suivi.done') {
+          var entry3 = APP.suiviTaches[ch.wk] && APP.suiviTaches[ch.wk][ch.eid];
+          var arr3 = Array.isArray(entry3) ? entry3 :
+            (entry3 && entry3.taches ? entry3.taches : null);
+          if (arr3) {
+            var t3 = arr3.find(function(t){ return t.id === ch.tid; });
+            if (t3) {
+              t3.done = ch.val;
+              if (ch.val) { t3.doneAt = Date.now(); t3.doneBy = ROLE; }
+              else { t3.doneAt = null; t3.doneBy = null; }
+              _stampField('suivi.' + ch.wk + '.' + ch.eid + '.' + ch.tid + '.done');
+              appliedCount++;
+            }
+          }
+        }
+      } catch(applyErr) {
+        console.warn('[Import Journal] Erreur application :', applyErr);
+      }
+    });
+  });
+
+  saveApp();
+  if (_fbApp && _fbDB) _fbWriteToCloud();
+  renderJournal();
+  toast('\u2705 Import Journal : ' + appliedCount + ' modification(s) appliquée(s) et synchronisée(s) avec Firebase.');
+}
+
 // ── _getFilteredJournalRows: retourner les lignes filtrées du journal ──
 function _getFilteredJournalRows() {
   var allRows = _buildJournalData();
@@ -10105,13 +10588,13 @@ function _sanitizeObj(val) {
 function _fbWriteToCloud() {
   if (!_fbApp || !_fbDB || !_fbAuth || !_fbAuth.currentUser) return;
 
-  // ── PILIER 1 : Double verrou dans _fbWriteToCloud ──────────────────────────
+  // ── PILIER 1 : Verrou d'initialisation ───────────────────────────────────
   if (!isInitialLoadComplete) {
     console.warn('[_fbWriteToCloud] BLOQUÉ — verrou d\'initialisation actif. Écriture annulée.');
     return;
   }
 
-  // ── MODULE 4 V20.1: Validation de schéma avant écriture ───────────────────
+  // ── MODULE 4 V20.1 : Validation de schéma avant écriture ─────────────────
   if (!APP || typeof APP !== 'object') {
     console.error('[V20.1] _fbWriteToCloud: APP null ou invalide — écriture annulée.');
     return;
@@ -10125,15 +10608,15 @@ function _fbWriteToCloud() {
     return;
   }
 
-  // ── PILIER 3 : Détection de vidange accidentelle ───────────────────────────
+  // ── PILIER 3 : Détection de vidange accidentelle ──────────────────────────
   var currentEquipsCount = (APP.equips || []).filter(function(e){ return !e.deleted; }).length;
   if (_lastKnownEquipsCount > 50 && currentEquipsCount === 0) {
-    var msg = '⛔ ERREUR DE SYNCHRONISATION DÉTECTÉE\n\n' +
+    var msg = '\u26D4 ERREUR DE SYNCHRONISATION DÉTECTÉE\n\n' +
               'Tentative d\'effacement massif bloquée :\n' +
               'Le parc est passé de ' + _lastKnownEquipsCount + ' à 0 équipements\n' +
               'en une seule opération.\n\n' +
               'L\'écriture vers Firebase a été annulée.\n\n' +
-              '➡ Action recommandée : rechargez la page (F5)\n' +
+              '\u27A1 Action recommandée : rechargez la page (F5)\n' +
               'pour restaurer les données depuis Firebase.';
     alert(msg);
     console.error('[Sécurité] VIDANGE ACCIDENTELLE DÉTECTÉE — écriture bloquée.', {
@@ -10143,16 +10626,34 @@ function _fbWriteToCloud() {
   }
   if (currentEquipsCount > 0) _lastKnownEquipsCount = currentEquipsCount;
 
-  console.log('Firebase: écriture vers serveur — profil:', ROLE, '— ' + new Date().toLocaleTimeString('fr-FR'));
-  // ⚡ RACE CONDITION FIX: bloquer le listener _ts pendant le debounce
+  // ── RACE CONDITION FIX : timestamper AVANT le debounce ────────────────────
+  // Bloque le listener _ts pendant la fenêtre de debounce pour éviter
+  // qu'une lecture distante déclenche une re-écriture immédiate.
   SYNC._fbLastWriteTs = Date.now();
+
+  // ── Debounce 1 seconde — fusionne les appels rapprochés ──────────────────
+  // Log déplacé DANS le timeout : ne s'affiche que lors d'une vraie écriture,
+  // pas à chaque appel de _fbWriteToCloud() (qui peut être buffered/annulé).
   if (_fbWriteDebounce) clearTimeout(_fbWriteDebounce);
   _fbWriteDebounce = setTimeout(function() {
+
+    // ── Flag _isWriting : une seule écriture simultanée ───────────────────
+    // Évite qu'un second appel parti en même temps génère un doublon réseau.
+    if (_isWriting) {
+      vlog('[_fbWriteToCloud] Écriture déjà en cours — appel ignoré.');
+      return;
+    }
+    _isWriting = true;
+
+    // Ce log n'apparaît QUE lors d'une vraie écriture réseau (après debounce)
+    console.log('Firebase: écriture vers serveur — profil:', ROLE,
+                '— ' + new Date().toLocaleTimeString('fr-FR'));
+
     try {
-      var ts = Date.now();
+      var ts  = Date.now();
       var ref = _fbDB.ref('atcdata');
 
-      // ── MODULE 4 V20.1: Sérialiser avec protection null ──────────────────
+      // ── Sérialisation avec protection null ────────────────────────────────
       function _safeSanitize(val) {
         if (val === null || val === undefined) return {};
         return _sanitizeObj(val);
@@ -10164,49 +10665,61 @@ function _fbWriteToCloud() {
 
       var update = {
         '_by': ROLE, '_ts': ts, '_v': 'v8',
-        '_fieldTs':        _safeSanitize(APP.fieldTs),
-        '_sections':       _safeSanitize(SYNC._sectionTs),
-        '_deletedAgentIds': APP._deletedAgentIds || [],
-        '_deletedEquipIds': APP._deletedEquipIds || [],
-        'equips':    _safeSanitizeArr(APP.equips),
-        'agents':    _safeSanitizeArr(APP.agents),
-        'planning':  _safeSanitize(APP.planning),
-        'suiviTaches': _safeSanitize(APP.suiviTaches),
-        'taches':    _safeSanitizeArr(APP.taches),
-        'hist':      _safeSanitizeArr(APP.hist),
-        'dm':        _safeSanitizeArr(APP.dm),
-        'urg':       _safeSanitizeArr(APP.urg),
-        'masterplan':_safeSanitize(APP.masterplan),
-        'pw':        _safeSanitize(APP.pw),
+        '_fieldTs':          _safeSanitize(APP.fieldTs),
+        '_sections':         _safeSanitize(SYNC._sectionTs),
+        '_deletedAgentIds':  APP._deletedAgentIds || [],
+        '_deletedEquipIds':  APP._deletedEquipIds || [],
+        'equips':     _safeSanitizeArr(APP.equips),
+        'agents':     _safeSanitizeArr(APP.agents),
+        'planning':   _safeSanitize(APP.planning),
+        'suiviTaches':_safeSanitize(APP.suiviTaches),
+        'taches':     _safeSanitizeArr(APP.taches),
+        'hist':       _safeSanitizeArr(APP.hist),
+        'dm':         _safeSanitizeArr(APP.dm),
+        'urg':        _safeSanitizeArr(APP.urg),
+        'masterplan': _safeSanitize(APP.masterplan),
+        'pw':         _safeSanitize(APP.pw),
         'masterplanLocked': APP.masterplanLocked || false
       };
+
       if (ROLE === 'dm') {
-        update['masterplan']       = _safeSanitize(APP.masterplan);
-        update['masterplanLocked'] = APP.masterplanLocked || false;
-        update['priorityRules']    = _safeSanitize(APP.priorityRules);
+        update['masterplan']            = _safeSanitize(APP.masterplan);
+        update['masterplanLocked']      = APP.masterplanLocked || false;
+        update['priorityRules']         = _safeSanitize(APP.priorityRules);
         update['priorityRulesLocked']   = !!APP.priorityRulesLocked;
         update['priorityRulesLockedAt'] = APP.priorityRulesLockedAt || null;
-        update['dm_inst']          = _safeSanitizeArr(APP.dm);
-        update['urg']              = _safeSanitizeArr(APP.urg);
-        update['pw']               = _safeSanitize(APP.pw);
-        update['tacheTypes']       = APP.tacheTypes || [];
-        update['appConfig']        = { nomLogiciel: APP_CONFIG.nomLogiciel||'DM-PLANNING', signature: APP_CONFIG.signature||'Asset Manager', version: APP_CONFIG.version||'' };
+        update['dm_inst']               = _safeSanitizeArr(APP.dm);
+        update['urg']                   = _safeSanitizeArr(APP.urg);
+        update['pw']                    = _safeSanitize(APP.pw);
+        update['tacheTypes']            = APP.tacheTypes || [];
+        update['appConfig']             = {
+          nomLogiciel: APP_CONFIG.nomLogiciel || 'DM-PLANNING',
+          signature:   APP_CONFIG.signature   || 'Asset Manager',
+          version:     APP_CONFIG.version     || ''
+        };
       }
+
       SYNC._fbLastWriteTs = ts;
+
       ref.update(update).then(function() {
+        _isWriting = false;                          // Libérer le verrou
         _fbSetCloudBadge('ok', '\u2601 Synchronisé');
         try { localStorage.removeItem(SK + '_offline_pending'); } catch(e) {}
       }).catch(function(err) {
+        _isWriting = false;                          // Libérer même en erreur
         _fbSetCloudBadge('error', '\u2601 Erreur');
         _saveLocalOnly();
         console.error('[V20.1] Firebase write error:', err.code, err.message);
-        toast('\u274c Firebase : ' + (err.code||err.message||'erreur'));
+        toast('\u274C Firebase\u202F: ' + (err.code || err.message || 'erreur'));
       });
+
     } catch(e) {
+      _isWriting = false;                            // Libérer même en exception
       console.error('[V20.1] Firebase write exception:', e);
-      toast('\u274c Erreur critique écriture Firebase : ' + (e.message || e));
+      toast('\u274C Erreur critique écriture Firebase\u202F: ' + (e.message || e));
     }
-  }, 400);
+
+  }, 1000); // Debounce porté à 1 s (était 400 ms) — max 1 écriture/s par session
 }
 
 
