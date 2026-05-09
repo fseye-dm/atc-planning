@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ═══════════════════════════════════════════════════════════════════
-  DM-PLANNING v20.8 — SOSETER HYDRO — F. SEYE — Directeur Matériel
+  DM-PLANNING v20.9 — SOSETER HYDRO — F. SEYE — Directeur Matériel
   GitHub Pages : https://fseye-dm.github.io/atc-planning/
   Firebase : dm-planning-soseter | Zone : europe-west1
 
@@ -117,6 +117,27 @@
      Séquencement Firebase : confirmé correct (3/3 scripts avant _fbInit).
      node --check : syntaxe JS validée.
 
+  ── CHANGELOG v20.9 (vs v20.8) ──────────────────────────────────
+  ✅ FIX 1 — PRIORITÉ CHEF sur dm.comment (Instructions DM)
+     a) _syncMerge : utilise remote.dm||remote.dm_inst (plus remote.dm_inst seul).
+        Cause racine : dm_inst écrit seulement par DM → stale lors d'une sync Chef.
+        remote.dm (écrit par tous les profils) contient le commentaire Chef actuel.
+     b) chefResetFromFirebase : idem, remote.dm_inst → remote.dm||remote.dm_inst.
+     c) atcdata/dm listener : cache APP._chefDmComments[id] mis à jour côté DM
+        à chaque réception Firebase → commentaire Chef préservé en race condition.
+     d) _fbWriteToCloud : ROLE==='dm' → dm array construit avec commentaires du
+        cache APP._chefDmComments avant écriture. DM ne peut jamais écraser Chef.
+  ✅ FIX 2a — COOP console warnings éliminés (popup.ts:302 + popup.ts:50)
+     Filtre étendu à /Cross-Origin-Opener-Policy/i (couvre window.closed ET
+     window.close). Ancienne regex ne couvrait que window\.closed.
+  ✅ FIX 2b — ÉCRITURES INTEMPESTIVES toutes les 30s supprimées
+     setInterval(saveApp, 30000) supprimé — auto-save périodique redondant.
+     Firebase listeners temps réel = source de vérité ; pas d'écriture auto.
+  ✅ FIX 3 — JOURNAL DES TÂCHES — Bouton Import XLSX câblé dans renderJournal()
+     importJournalXLSX() existait mais sans bouton UI. Bouton «📤 Import XLSX»
+     ajouté, visible UNIQUEMENT profil DM. Export renommé «📥 Export XLSX».
+  node --check : syntaxe JS validée.
+
   ── CHANGELOG v20.8 (vs v20.7) ──────────────────────────────
   ✅ MODULE 10 — JOURNAL DES TÂCHES — Bouton d'import Excel
      Bouton «📥 Importer» ajouté à côté de l'export Excel dans renderJournal()
@@ -198,7 +219,7 @@
 <meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a1628'/%3E%3Ctext x='6' y='24' font-size='20' font-family='Arial' font-weight='bold' fill='%23f97316'%3EAT%3C/text%3E%3C/svg%3E">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DM-PLANNING v20.8 | Direction Matériel Planning — SOSETER HYDRO</title>
+<title>DM-PLANNING v20.9 | Direction Matériel Planning — SOSETER HYDRO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
 <!--
@@ -328,7 +349,8 @@
   var _origWarn = console.warn;
   console.warn = function() {
     var msg = Array.prototype.slice.call(arguments).join(' ');
-    if (/Cross-Origin-Opener-Policy.*window\.closed/i.test(msg)) return;
+    // v20.9 FIX — filtre étendu : couvre window.close ET window.closed (popup.ts:50 + popup.ts:302)
+    if (/Cross-Origin-Opener-Policy/i.test(msg)) return;
     _origWarn.apply(console, arguments);
   };
 
@@ -1896,9 +1918,14 @@ function _syncMerge(remote) {
   // ══════════════════════════════════════════════════════════
   // 3. INSTRUCTIONS DM
   // ══════════════════════════════════════════════════════════
-  if (remote.dm_inst) {
+  // v20.9 FIX — utiliser remote.dm en priorité sur remote.dm_inst.
+  // remote.dm_inst n'est écrit que par le DM → stale quand le Chef a écrit
+  // un commentaire après la dernière écriture DM. remote.dm est écrit par
+  // TOUS les profils et contient donc toujours le commentaire Chef le plus récent.
+  var _remoteDmArr = (remote.dm && Array.isArray(remote.dm)) ? remote.dm : remote.dm_inst;
+  if (_remoteDmArr && Array.isArray(_remoteDmArr)) {
     var existDm = APP.dm.map(function(d) { return d.id; });
-    remote.dm_inst.forEach(function(rd) {
+    _remoteDmArr.forEach(function(rd) {
       var idx = existDm.indexOf(rd.id);
       if (idx === -1) {
         APP.dm.push(rd); changed = true;
@@ -2806,6 +2833,17 @@ function _fbOnSignedIn(user) {
       if (!Array.isArray(remDm)) return;
       if (JSON.stringify(APP.dm) !== JSON.stringify(remDm)) {
         APP.dm = remDm;
+        // v20.9 FIX 1c — cache des commentaires Chef côté DM
+        // Mis à jour à chaque réception Firebase pour garantir que le DM
+        // n'écrase jamais le commentaire Chef lors d'un write simultané.
+        if (ROLE === 'dm') {
+          if (!APP._chefDmComments) APP._chefDmComments = {};
+          remDm.forEach(function(d) {
+            if (d && d.id !== undefined) {
+              APP._chefDmComments[d.id] = d.comment || '';
+            }
+          });
+        }
         vlog('Firebase dm: ' + remDm.length + ' instruction(s) synchronisée(s)');
         try {
           var pg = (document.getElementById('ptitle')||{}).textContent||'';
@@ -8874,8 +8912,11 @@ function toast(msg, duration) {
 // PERSISTENCE & SYNC — INIT
 // ============================================================
 
-// Auto-save every 30 seconds
-setInterval(function() { saveApp(); }, 30000);
+// v20.9 FIX — Auto-save setInterval SUPPRIMÉ (était: toutes les 30s)
+// Firebase listeners temps réel (equips, planning, dm, _ts) assurent la persistance.
+// Une écriture périodique est redondante et génère des logs "écriture vers serveur"
+// toutes les 30s même sans action utilisateur (bug signalé en profil Chef).
+// saveApp() reste appelé sur chaque action utilisateur explicite.
 
 // Save before leaving (best-effort)
 window.addEventListener('beforeunload', function() {
@@ -9366,7 +9407,8 @@ function chefResetFromFirebase() {
     // Reconstruire APP depuis le remote (remplacement total)
     if (remote.equips)      APP.equips       = remote.equips;
     if (remote.agents)      APP.agents       = remote.agents;
-    if (remote.dm_inst)     APP.dm           = remote.dm_inst;
+    // v20.9 FIX — remote.dm en priorité (Chef y écrit ses commentaires)
+    if (remote.dm || remote.dm_inst)  APP.dm = remote.dm || remote.dm_inst;
     if (remote.urg)         APP.urg          = remote.urg;
     if (remote.hist)        APP.hist         = remote.hist;
     if (remote.planning)    APP.planning     = remote.planning;
@@ -9975,8 +10017,13 @@ function renderJournal() {
     '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">' +
       '<div class="stitle" style="font-size:15px;margin-bottom:0;">📔 Journal des Tâches &mdash; Registre Historique</div>' +
       '<div style="display:flex;gap:6px;align-items:center;">' +
-        '<button onclick="exportJournalXLSX()" title="Exporter les lignes visibles en fichier Excel" ' +
-          'style="background:#10b981;color:#fff;border:none;padding:5px 13px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.3px;white-space:nowrap;">📊 Export Excel</button>' +
+        // v20.9 FIX 3 — boutons Export + Import XLSX câblés dans renderJournal()
+        '<button onclick="exportJournalXLSX()" title="Exporter les lignes visibles en fichier Excel (.xlsx)" ' +
+          'style="background:#10b981;color:#fff;border:none;padding:5px 13px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.3px;white-space:nowrap;">📥 Export XLSX</button>' +
+        (ROLE === 'dm'
+          ? '<button onclick="importJournalXLSX()" title="Importer un fichier Excel (.xlsx) exporté depuis ce journal — DM uniquement" ' +
+              'style="background:#f97316;color:#fff;border:none;padding:5px 13px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.3px;white-space:nowrap;">📤 Import XLSX</button>'
+          : '') +
         '<button onclick="printJournal()" title="Imprimer le tableau courant" ' +
           'style="background:var(--b5);color:#fff;border:none;padding:5px 11px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">🖨 Imprimer</button>' +
       '</div>' +
@@ -10675,7 +10722,19 @@ function _fbWriteToCloud() {
         'suiviTaches':_safeSanitize(APP.suiviTaches),
         'taches':     _safeSanitizeArr(APP.taches),
         'hist':       _safeSanitizeArr(APP.hist),
-        'dm':         _safeSanitizeArr(APP.dm),
+        // v20.9 FIX 1d — DM préserve les commentaires Chef avant écriture
+        // APP._chefDmComments est mis à jour par le listener atcdata/dm.
+        // Sans ce guard, une écriture DM simultanée à un comment Chef peut
+        // écraser le commentaire Chef en Firebase (race condition).
+        'dm':         _safeSanitizeArr(ROLE === 'dm' && APP._chefDmComments
+          ? APP.dm.map(function(d) {
+              var copy = Object.assign({}, d);
+              if (APP._chefDmComments.hasOwnProperty(d.id) && APP._chefDmComments[d.id]) {
+                copy.comment = APP._chefDmComments[d.id];
+              }
+              return copy;
+            })
+          : APP.dm),
         'urg':        _safeSanitizeArr(APP.urg),
         'masterplan': _safeSanitize(APP.masterplan),
         'pw':         _safeSanitize(APP.pw),
@@ -10688,7 +10747,16 @@ function _fbWriteToCloud() {
         update['priorityRules']         = _safeSanitize(APP.priorityRules);
         update['priorityRulesLocked']   = !!APP.priorityRulesLocked;
         update['priorityRulesLockedAt'] = APP.priorityRulesLockedAt || null;
-        update['dm_inst']               = _safeSanitizeArr(APP.dm);
+        // v20.9 FIX — dm_inst aussi protégé (commentaires Chef préservés)
+        update['dm_inst']               = _safeSanitizeArr(APP._chefDmComments
+          ? APP.dm.map(function(d) {
+              var copy2 = Object.assign({}, d);
+              if (APP._chefDmComments.hasOwnProperty(d.id) && APP._chefDmComments[d.id]) {
+                copy2.comment = APP._chefDmComments[d.id];
+              }
+              return copy2;
+            })
+          : APP.dm);
         update['urg']                   = _safeSanitizeArr(APP.urg);
         update['pw']                    = _safeSanitize(APP.pw);
         update['tacheTypes']            = APP.tacheTypes || [];
