@@ -1025,7 +1025,7 @@ textarea{resize:vertical;min-height:60px}
       <div class="kgrid" id="kgrid"></div>
       <div class="cgrid">
         <div class="cc"><div class="ctitle">Disponibilite par Famille</div><div class="chart-wrap"><canvas id="chartF"></canvas></div></div>
-        <div class="cc"><div class="ctitle">Taux de Realisation (%)</div><div class="chart-wrap"><canvas id="chartR"></canvas></div></div>
+        <div class="cc"><div class="ctitle">Suivi du planning hebdomadaire</div><div class="chart-wrap"><canvas id="chartR"></canvas></div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div class="card">
@@ -6379,82 +6379,115 @@ function renderDash() {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } }, scales: { x: { ticks: { font: { size: 9 } } }, y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
   });
 
-  // ── GRAPHIQUE TAUX DE RÉALISATION — Combiné Barres + Tendance ───────────
+  // ── GRAPHIQUE SUIVI DU PLANNING HEBDOMADAIRE — Courbe cumulée ───────────
   (function() {
     var ctx = document.getElementById('chartR');
     if (!ctx) return;
     if (ctx._chartInstance) { try { ctx._chartInstance.destroy(); } catch(e2) {} }
 
-    // Construire les 7 jours de la semaine courante (chronologique, sans répétition)
-    var wi = getWeekInfo();
-    var jours = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
-    var joursLabels = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
-    var daily = APP.planning.daily || {};
+    var wi          = getWeekInfo();
+    var mondayDate  = wi.mondayDate; // Date objet du lundi de la semaine courante
 
-    // Calculer le taux de réalisation réel par jour
-    // = moyenne des réalisations de tous les équipements planifiés ce jour-là
-    var chartData = jours.map(function(jour) {
-      var dayData = daily[jour] || {};
-      var ids = Object.keys(dayData).filter(function(id){ return dayData[id] && dayData[id].included; });
-      if (!ids.length) return null; // aucun équipement planifié ce jour = null
-      var sum = ids.reduce(function(s, id) {
-        var pct = dayData[id].realisation ? parseInt(dayData[id].realisation) : 0;
-        // Prendre le max entre le % planning et le % tâches
-        var taskPct = computeEquipPct(id);
-        return s + Math.max(pct, taskPct);
-      }, 0);
-      return Math.round(sum / ids.length);
-    });
-
-    // Construire les labels avec date (ex: "Lun 27/04")
-    var mondayDate = wi.mondayDate;
-    var chartLabels = jours.map(function(j, i) {
+    // ── Axe X : jours dans l'ordre chronologique Lun→Dim avec date JJ/MM ──
+    var joursKeys   = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+    var joursShort  = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+    var chartLabels = joursKeys.map(function(j, i) {
       var d = new Date(mondayDate);
       d.setDate(mondayDate.getDate() + i);
-      var dd = ('0'+d.getDate()).slice(-2), mm = ('0'+(d.getMonth()+1)).slice(-2);
-      return joursLabels[i] + ' ' + dd + '/' + mm;
+      var dd = ('0' + d.getDate()).slice(-2);
+      var mm = ('0' + (d.getMonth() + 1)).slice(-2);
+      return joursShort[i] + ' ' + dd + '/' + mm;
     });
 
-    // Série 2: moyenne mobile 3 jours pour la tendance
-    var tendance = chartData.map(function(v, i) {
-      var vals = chartData.slice(Math.max(0,i-1), Math.min(chartData.length, i+2)).filter(function(x){ return x !== null; });
-      return vals.length ? Math.round(vals.reduce(function(s,x){return s+x;},0)/vals.length) : null;
+    // ── Équipements planifiés cette semaine (lun–sam, sans doublon) ──
+    var plannedMap = {};
+    joursKeys.slice(0, 6).forEach(function(jour) {
+      var day = (APP.planning.daily && APP.planning.daily[jour]) || {};
+      Object.keys(day).forEach(function(id) {
+        if (day[id] && day[id].included) plannedMap[id] = true;
+      });
+    });
+    var allPlannedIds = Object.keys(plannedMap);
+
+    // ── Toutes les tâches suivi de la semaine ──
+    var allTaches = [];
+    allPlannedIds.forEach(function(eid) {
+      var taches = getSuiviEquipTaches(eid);
+      if (taches && taches.length) {
+        taches.forEach(function(t) { if (t) allTaches.push(t); });
+      }
     });
 
-    // Couleurs barres selon le taux
-    var barColors = chartData.map(function(v) {
-      if (v === null) return 'rgba(148,163,184,0.3)';
-      return v >= 75 ? '#34d399' : v >= 50 ? '#60a5fa' : v >= 25 ? '#fbbf24' : '#f87171';
+    // ── Choix du mode : suiviTaches (prioritaire) ou fallback sur réalisation ──
+    var hasSuivi       = allTaches.length > 0;
+    var totalPlanifie  = hasSuivi ? allTaches.length : allPlannedIds.length;
+
+    // Ligne planifiée : valeur constante (total de la semaine)
+    var planifieData = joursKeys.map(function() { return totalPlanifie || 0; });
+
+    // Courbe réalisée cumulée par jour
+    var realiseData = joursKeys.map(function(jour, i) {
+      var d = new Date(mondayDate);
+      d.setDate(mondayDate.getDate() + i);
+      d.setHours(23, 59, 59, 999);
+      var endOfDay = d.getTime();
+
+      if (hasSuivi) {
+        // Mode principal : tâches dont done=true ET doneAt <= fin du jour
+        return allTaches.filter(function(t) {
+          return t.done && t.doneAt && t.doneAt <= endOfDay;
+        }).length;
+      } else {
+        // Mode fallback : équipements avec réalisation >= 100% au plus tard ce jour
+        var jAcc = joursKeys.slice(0, i + 1);
+        var count = 0;
+        allPlannedIds.forEach(function(eid) {
+          var best = 0;
+          jAcc.forEach(function(dj) {
+            var dd2 = (APP.planning.daily && APP.planning.daily[dj]) || {};
+            if (dd2[eid] && dd2[eid].realisation) {
+              best = Math.max(best, parseInt(dd2[eid].realisation) || 0);
+            }
+          });
+          if (best >= 100) count++;
+        });
+        return count;
+      }
     });
 
+    // ── Création du graphique ──
     ctx._chartInstance = new Chart(ctx, {
-      type: 'bar',
+      type: 'line',
       data: {
         labels: chartLabels,
         datasets: [
           {
-            type: 'bar',
-            label: 'Taux de réalisation',
-            data: chartData,
-            backgroundColor: barColors,
-            borderColor: barColors.map(function(c){ return c.replace('0.3','1'); }),
-            borderWidth: 1,
-            borderRadius: 4,
-            order: 2,
-            skipNull: true
+            label: 'Planifié',
+            data: planifieData,
+            borderColor: '#9ca3af',
+            backgroundColor: 'transparent',
+            borderWidth: 1.5,
+            borderDash: [5, 4],
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            pointHoverBackgroundColor: '#9ca3af',
+            tension: 0,
+            fill: false,
+            order: 2
           },
           {
-            type: 'line',
-            label: 'Tendance (moy. mobile 3j)',
-            data: tendance,
-            borderColor: '#1d4ed8',
-            backgroundColor: 'transparent',
+            label: 'Réalisé cumulé',
+            data: realiseData,
+            borderColor: '#0A1F4E',
+            backgroundColor: 'rgba(10,31,78,0.08)',
             borderWidth: 2.5,
-            pointBackgroundColor: '#1d4ed8',
+            pointBackgroundColor: '#FFC000',
+            pointBorderColor: '#0A1F4E',
+            pointBorderWidth: 1.5,
             pointRadius: 4,
             pointHoverRadius: 6,
-            tension: 0.4,
-            fill: false,
+            tension: 0.3,
+            fill: true,
             order: 1,
             spanGaps: true
           }
@@ -6467,8 +6500,13 @@ function renderDash() {
         plugins: {
           legend: {
             display: true,
-            position: 'top',
-            labels: { font: { size: 10 }, boxWidth: 12, padding: 8 }
+            position: 'bottom',
+            labels: {
+              font: { size: 10 },
+              boxWidth: 16,
+              padding: 10,
+              usePointStyle: true
+            }
           },
           tooltip: {
             callbacks: {
@@ -6476,9 +6514,13 @@ function renderDash() {
                 return ctx2[0] ? ctx2[0].label : '';
               },
               label: function(ctx2) {
-                if (ctx2.parsed.y === null) return ctx2.dataset.label + ': Aucun équipement';
-                var emoji = ctx2.parsed.y >= 75 ? '✅' : ctx2.parsed.y >= 50 ? '🟡' : '🔴';
-                return ' ' + emoji + ' ' + ctx2.dataset.label + ' : ' + ctx2.parsed.y + '%';
+                var val = (ctx2.parsed.y !== null && ctx2.parsed.y !== undefined) ? ctx2.parsed.y : '—';
+                if (ctx2.datasetIndex === 0) {
+                  return ' \u2014 ' + ctx2.dataset.label + ' : ' + val + ' t\u00e2che(s)';
+                }
+                var pct = (totalPlanifie > 0 && typeof val === 'number')
+                  ? ' (' + Math.round(val / totalPlanifie * 100) + '%)' : '';
+                return ' \u25cf ' + ctx2.dataset.label + ' : ' + val + ' t\u00e2che(s)' + pct;
               }
             }
           }
@@ -6490,11 +6532,11 @@ function renderDash() {
           },
           y: {
             min: 0,
-            max: 100,
+            suggestedMax: Math.max(totalPlanifie, 1),
             ticks: {
               font: { size: 9 },
-              callback: function(v) { return v + '%'; },
-              stepSize: 25
+              stepSize: 1,
+              callback: function(v) { return Number.isInteger(v) ? v : ''; }
             },
             grid: { color: 'rgba(0,0,0,0.05)' }
           }
