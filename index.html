@@ -530,6 +530,30 @@ textarea{resize:vertical;min-height:60px}
 @keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(12px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 /* Chart containers fixed height */
 .chart-wrap{position:relative;height:190px;max-height:190px;overflow:hidden}
+/* ── KANBAN PLANNING BOARD ─────────────────────────────── */
+#kanban-haute-cc{overflow-y:auto;min-height:200px;max-height:290px}
+.kb-basse-wrap{background:#fff;border-radius:10px;border:1px solid var(--g200);padding:11px 13px;margin-bottom:14px}
+.kb-zone-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.kb-haute-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+@media(min-width:1200px){.kb-haute-grid{grid-template-columns:repeat(4,1fr)}}
+@media(min-width:768px) and (max-width:1199px){.kb-haute-grid{grid-template-columns:repeat(3,1fr)}}
+.kb-basse-strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+.kb-basse-strip::-webkit-scrollbar{height:4px}.kb-basse-strip::-webkit-scrollbar-track{background:#f1f5f9;border-radius:2px}.kb-basse-strip::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:2px}
+.kbc{background:#fff;border:1.5px solid var(--g200);border-radius:8px;padding:8px 9px;cursor:pointer;transition:box-shadow .15s,transform .1s;flex-shrink:0;user-select:none}
+.kbc:hover{box-shadow:0 4px 12px rgba(0,0,0,.13);transform:translateY(-1px)}
+.kbc:active{transform:translateY(0)}
+.kbc.kbc-red{border-left:4px solid #ef4444}.kbc.kbc-orange{border-left:4px solid #f97316}.kbc.kbc-yellow{border-left:4px solid #f59e0b}.kbc.kbc-green{border-left:4px solid #10b981}
+.kbc-code{font-size:11px;font-weight:700;color:var(--b9);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbc-fam{font-size:9px;color:var(--g400);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:1px 0 4px}
+.kbc-bar{height:5px;background:var(--g100);border-radius:3px;overflow:hidden;margin-bottom:4px}
+.kbc-fill{height:100%;border-radius:3px;transition:width .4s}
+.kbc-pct{font-size:10px;font-weight:700;text-align:right}
+.kbc-red .kbc-fill{background:#ef4444}.kbc-red .kbc-pct{color:#ef4444}
+.kbc-orange .kbc-fill{background:#f97316}.kbc-orange .kbc-pct{color:#f97316}
+.kbc-yellow .kbc-fill{background:#f59e0b}.kbc-yellow .kbc-pct{color:#d97706}
+.kbc-green .kbc-fill{background:#10b981}.kbc-green .kbc-pct{color:#059669}
+.kb-empty{font-size:12px;color:var(--g400);padding:6px 0}
+.kb-legend{font-size:10px;color:var(--g500);margin-top:9px;display:flex;gap:12px;flex-wrap:wrap;border-top:1px solid var(--g100);padding-top:7px}
 /* MP anomaly column */
 .mp-anom{min-width:160px;max-width:200px;font-size:10px;color:var(--g600);overflow:hidden;text-overflow:ellipsis}
 .row-late td{background:#fff1f1!important;color:#991b1b;border-left:3px solid #ef4444}
@@ -1025,8 +1049,9 @@ textarea{resize:vertical;min-height:60px}
       <div class="kgrid" id="kgrid"></div>
       <div class="cgrid">
         <div class="cc"><div class="ctitle">Disponibilite par Famille</div><div class="chart-wrap"><canvas id="chartF"></canvas></div></div>
-        <div class="cc"><div class="ctitle">Suivi du planning hebdomadaire</div><div class="chart-wrap"><canvas id="chartR"></canvas></div></div>
+        <div class="cc" id="kanban-haute-cc"></div>
       </div>
+      <div class="kb-basse-wrap" id="kanban-basse-wrap"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div class="card">
           <div class="ch"><span class="stitle" style="font-size:12px;margin:0;">Urgences en cours</span><span class="badge bred" id="ubadge">0</span></div>
@@ -6282,6 +6307,148 @@ function updateWeekBadge() {
 }
 
 // ============================================================
+// KANBAN PLANNING BOARD
+// ============================================================
+
+// Calcule le taux d'avancement d'un équipement : MIN(tâches_suivi, réalisation_chef)
+function _getEquipTaux(eid) {
+  var chefMax = 0;
+  ['lundi','mardi','mercredi','jeudi','vendredi','samedi'].forEach(function(d) {
+    var dd = (APP.planning.daily && APP.planning.daily[d]) || {};
+    if (dd[eid] && dd[eid].realisation) {
+      chefMax = Math.max(chefMax, parseInt(dd[eid].realisation) || 0);
+    }
+  });
+  var taches = getSuiviEquipTaches(eid);
+  if (!taches || !taches.length) return chefMax;
+  var tachePct = computeEquipPct(eid);
+  if (chefMax === 0) return tachePct;
+  return Math.min(tachePct, chefMax);
+}
+
+// Navigation depuis une carte Kanban → Planning Hebdo onglet Lundi
+function kanbanGoEquip(eid) {
+  showPage('planning');
+  switchPlan('lundi');
+  // Tenter de mettre en surbrillance la ligne équipement dans le tableau
+  setTimeout(function() {
+    var eq = APP.equips.find(function(e) { return e.id === eid; });
+    if (!eq) return;
+    var rows = document.querySelectorAll('#plan-day-body tr, .plan-row, [data-eid]');
+    var found = false;
+    rows.forEach(function(r) {
+      if (!found && r.textContent && r.textContent.indexOf(eq.code) !== -1) {
+        r.style.transition = 'background .3s';
+        r.style.background = '#fffbeb';
+        r.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(function() { r.style.background = ''; }, 2500);
+        found = true;
+      }
+    });
+  }, 450);
+}
+
+// Rendu du Kanban Planning Board (Zone Haute + Zone Basse)
+function renderKanbanBoard() {
+  var hauteEl = document.getElementById('kanban-haute-cc');
+  var basseEl  = document.getElementById('kanban-basse-wrap');
+  if (!hauteEl && !basseEl) return;
+
+  // Collecte des équipements planifiés cette semaine (lun–sam, sans doublon)
+  var jours = ['lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+  var plannedMap = {};
+  jours.forEach(function(jour) {
+    var day = (APP.planning.daily && APP.planning.daily[jour]) || {};
+    Object.keys(day).forEach(function(id) {
+      if (day[id] && day[id].included) plannedMap[id] = true;
+    });
+  });
+  var allIds = Object.keys(plannedMap);
+
+  // Aucun équipement planifié
+  if (!allIds.length) {
+    if (hauteEl) hauteEl.innerHTML =
+      '<div class="kb-zone-title" style="color:#f59e0b;">\u26a0\ufe0f \u00c9QUIPEMENTS EN RETARD</div>' +
+      '<div class="kb-empty">Aucun \u00e9quipement planifi\u00e9 cette semaine.</div>';
+    if (basseEl) basseEl.innerHTML = '';
+    return;
+  }
+
+  // Calcul taux + métadonnées pour chaque équipement
+  var cards = allIds.map(function(eid) {
+    var eq  = APP.equips.find(function(e) { return e.id === eid; }) || {};
+    var taux = _getEquipTaux(eid);
+    var cls  = taux >= 100 ? 'kbc-green' : taux >= 75 ? 'kbc-yellow' : taux >= 40 ? 'kbc-orange' : 'kbc-red';
+    var fam  = (eq.famille || '');
+    return { eid: eid, code: eq.code || eid, famille: fam, taux: taux, cls: cls };
+  });
+
+  // Tri et séparation des zones
+  var retard  = cards.filter(function(c) { return c.taux < 40; }).sort(function(a,b) { return a.taux - b.taux; });
+  var encours = cards.filter(function(c) { return c.taux >= 40; }).sort(function(a,b) { return a.taux - b.taux; });
+
+  // Générateur de carte HTML
+  function mkCard(c, minW) {
+    var sMin   = minW ? 'min-width:' + minW + ';' : '';
+    var famShort = c.famille.length > 15 ? c.famille.substring(0, 14) + '\u2026' : c.famille;
+    var pct100 = Math.min(c.taux, 100);
+    return '<div class="kbc ' + c.cls + '" style="' + sMin + '" ' +
+      'onclick="kanbanGoEquip(\'' + c.eid + '\')" ' +
+      'title="' + c.code + ' \u2014 ' + c.famille + ' (' + c.taux + '%)">' +
+      '<div class="kbc-code">' + c.code + '</div>' +
+      '<div class="kbc-fam">' + famShort + '</div>' +
+      '<div class="kbc-bar"><div class="kbc-fill" style="width:' + pct100 + '%;"></div></div>' +
+      '<div class="kbc-pct">' + c.taux + '%</div>' +
+    '</div>';
+  }
+
+  var legend =
+    '<div class="kb-legend">' +
+    '\uD83D\uDFE2 Termin\u00e9 (100%)' +
+    '<span>\uD83D\uDFE1 &gt;75%</span>' +
+    '<span>\uD83D\uDFE0 40\u201375%</span>' +
+    '<span>\uD83D\uDD34 &lt;40% (Retard)</span>' +
+    '</div>';
+
+  // ── Zone Haute (dans le cc de droite du cgrid) ──
+  if (hauteEl) {
+    var h = '<div class="kb-zone-title" style="color:#dc2626;">' +
+      '\u26a0\ufe0f \u00c9QUIPEMENTS EN RETARD' +
+      '<span style="font-size:10px;font-weight:400;color:var(--g400);text-transform:none;letter-spacing:0;margin-left:4px;">' +
+        '(' + retard.length + ' / ' + allIds.length + ')' +
+      '</span></div>';
+    if (!retard.length) {
+      h += '<div class="kb-empty" style="color:#059669;">\u2705 Aucun \u00e9quipement en retard cette semaine.</div>';
+    } else {
+      h += '<div class="kb-haute-grid">';
+      retard.forEach(function(c) { h += mkCard(c, ''); });
+      h += '</div>';
+    }
+    h += legend;
+    hauteEl.innerHTML = h;
+  }
+
+  // ── Zone Basse (bandeau horizontal pleine largeur) ──
+  if (basseEl) {
+    if (!encours.length) {
+      basseEl.innerHTML =
+        '<div class="kb-zone-title" style="color:#059669;">\u2705 \u00c9QUIPEMENTS EN COURS</div>' +
+        '<div class="kb-empty">Tous les \u00e9quipements planifi\u00e9s sont en retard (&lt;40%).</div>';
+      return;
+    }
+    var b = '<div class="kb-zone-title" style="color:#059669;">' +
+      '\u2705 \u00c9QUIPEMENTS EN COURS' +
+      '<span style="font-size:10px;font-weight:400;color:var(--g400);text-transform:none;letter-spacing:0;margin-left:4px;">' +
+        '(' + encours.length + ' \u00e9quip. &mdash; d\u00e9filement horizontal)' +
+      '</span></div>' +
+      '<div class="kb-basse-strip">';
+    encours.forEach(function(c) { b += mkCard(c, '132px'); });
+    b += '</div>';
+    basseEl.innerHTML = b;
+  }
+}
+
+// ============================================================
 // DASHBOARD
 // ============================================================
 function renderDash() {
@@ -6363,7 +6530,6 @@ function renderDash() {
 
   // Charts
   var c1 = Chart.getChart('chartF'); if (c1) c1.destroy();
-  var c2 = Chart.getChart('chartR'); if (c2) c2.destroy();
 
   var mainFams = ['BULLDOZERS','MOTO-GRADERS','CHARGEURS','PELLES SUR PNEUS','GRUES MOBILES ET PONTS','TRACTEURS ROUTIERS','VEHICULES LEGERS','DUMPERS'];
   var fams = mainFams.filter(function(f) { return APP.equips.some(function(e) { return e.famille === f; }); });
@@ -6379,171 +6545,8 @@ function renderDash() {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } }, scales: { x: { ticks: { font: { size: 9 } } }, y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
   });
 
-  // ── GRAPHIQUE SUIVI DU PLANNING HEBDOMADAIRE — Courbe cumulée ───────────
-  (function() {
-    var ctx = document.getElementById('chartR');
-    if (!ctx) return;
-    if (ctx._chartInstance) { try { ctx._chartInstance.destroy(); } catch(e2) {} }
-
-    var wi          = getWeekInfo();
-    var mondayDate  = wi.mondayDate; // Date objet du lundi de la semaine courante
-
-    // ── Axe X : jours dans l'ordre chronologique Lun→Dim avec date JJ/MM ──
-    var joursKeys   = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
-    var joursShort  = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
-    var chartLabels = joursKeys.map(function(j, i) {
-      var d = new Date(mondayDate);
-      d.setDate(mondayDate.getDate() + i);
-      var dd = ('0' + d.getDate()).slice(-2);
-      var mm = ('0' + (d.getMonth() + 1)).slice(-2);
-      return joursShort[i] + ' ' + dd + '/' + mm;
-    });
-
-    // ── Équipements planifiés cette semaine (lun–sam, sans doublon) ──
-    var plannedMap = {};
-    joursKeys.slice(0, 6).forEach(function(jour) {
-      var day = (APP.planning.daily && APP.planning.daily[jour]) || {};
-      Object.keys(day).forEach(function(id) {
-        if (day[id] && day[id].included) plannedMap[id] = true;
-      });
-    });
-    var allPlannedIds = Object.keys(plannedMap);
-
-    // ── Toutes les tâches suivi de la semaine ──
-    var allTaches = [];
-    allPlannedIds.forEach(function(eid) {
-      var taches = getSuiviEquipTaches(eid);
-      if (taches && taches.length) {
-        taches.forEach(function(t) { if (t) allTaches.push(t); });
-      }
-    });
-
-    // ── Choix du mode : suiviTaches (prioritaire) ou fallback sur réalisation ──
-    var hasSuivi       = allTaches.length > 0;
-    var totalPlanifie  = hasSuivi ? allTaches.length : allPlannedIds.length;
-
-    // Ligne planifiée : valeur constante (total de la semaine)
-    var planifieData = joursKeys.map(function() { return totalPlanifie || 0; });
-
-    // Courbe réalisée cumulée par jour
-    var realiseData = joursKeys.map(function(jour, i) {
-      var d = new Date(mondayDate);
-      d.setDate(mondayDate.getDate() + i);
-      d.setHours(23, 59, 59, 999);
-      var endOfDay = d.getTime();
-
-      if (hasSuivi) {
-        // Mode principal : tâches dont done=true ET doneAt <= fin du jour
-        return allTaches.filter(function(t) {
-          return t.done && t.doneAt && t.doneAt <= endOfDay;
-        }).length;
-      } else {
-        // Mode fallback : équipements avec réalisation >= 100% au plus tard ce jour
-        var jAcc = joursKeys.slice(0, i + 1);
-        var count = 0;
-        allPlannedIds.forEach(function(eid) {
-          var best = 0;
-          jAcc.forEach(function(dj) {
-            var dd2 = (APP.planning.daily && APP.planning.daily[dj]) || {};
-            if (dd2[eid] && dd2[eid].realisation) {
-              best = Math.max(best, parseInt(dd2[eid].realisation) || 0);
-            }
-          });
-          if (best >= 100) count++;
-        });
-        return count;
-      }
-    });
-
-    // ── Création du graphique ──
-    ctx._chartInstance = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: chartLabels,
-        datasets: [
-          {
-            label: 'Planifié',
-            data: planifieData,
-            borderColor: '#9ca3af',
-            backgroundColor: 'transparent',
-            borderWidth: 1.5,
-            borderDash: [5, 4],
-            pointRadius: 0,
-            pointHoverRadius: 4,
-            pointHoverBackgroundColor: '#9ca3af',
-            tension: 0,
-            fill: false,
-            order: 2
-          },
-          {
-            label: 'Réalisé cumulé',
-            data: realiseData,
-            borderColor: '#0A1F4E',
-            backgroundColor: 'rgba(10,31,78,0.08)',
-            borderWidth: 2.5,
-            pointBackgroundColor: '#FFC000',
-            pointBorderColor: '#0A1F4E',
-            pointBorderWidth: 1.5,
-            pointRadius: 4,
-            pointHoverRadius: 6,
-            tension: 0.3,
-            fill: true,
-            order: 1,
-            spanGaps: true
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: {
-            display: true,
-            position: 'bottom',
-            labels: {
-              font: { size: 10 },
-              boxWidth: 16,
-              padding: 10,
-              usePointStyle: true
-            }
-          },
-          tooltip: {
-            callbacks: {
-              title: function(ctx2) {
-                return ctx2[0] ? ctx2[0].label : '';
-              },
-              label: function(ctx2) {
-                var val = (ctx2.parsed.y !== null && ctx2.parsed.y !== undefined) ? ctx2.parsed.y : '—';
-                if (ctx2.datasetIndex === 0) {
-                  return ' \u2014 ' + ctx2.dataset.label + ' : ' + val + ' t\u00e2che(s)';
-                }
-                var pct = (totalPlanifie > 0 && typeof val === 'number')
-                  ? ' (' + Math.round(val / totalPlanifie * 100) + '%)' : '';
-                return ' \u25cf ' + ctx2.dataset.label + ' : ' + val + ' t\u00e2che(s)' + pct;
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            grid: { display: false },
-            ticks: { font: { size: 9 }, maxRotation: 0 }
-          },
-          y: {
-            min: 0,
-            suggestedMax: Math.max(totalPlanifie, 1),
-            ticks: {
-              font: { size: 9 },
-              stepSize: 1,
-              callback: function(v) { return Number.isInteger(v) ? v : ''; }
-            },
-            grid: { color: 'rgba(0,0,0,0.05)' }
-          }
-        }
-      }
-    });
-  })();}
+  renderKanbanBoard();
+}
 
 // ============================================================
 // MASTER PLANNING
